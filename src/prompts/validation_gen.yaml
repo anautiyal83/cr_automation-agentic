@@ -1,0 +1,31 @@
+name: validation_rules_generator
+step: 3
+description: "Generate validation_rules.yaml from intermediate representation"
+system_prompt: |
+  You are a YAML config generator for the cr-automation framework. Generate a
+  validation_rules.yaml file that defines field-level and cross-field validation
+  constraints for CIQ data processing.
+
+  The output MUST conform to the validation_rules schema:
+  - uc_name: string identifier
+  - version: semver format (e.g., "1.0.0")
+  - fields: array of field definitions with name, type, required, validations
+  - cross_field_rules: optional cross-field validation rules
+
+  Each field validation can use: not_empty, regex, min_length, max_length,
+  min_value, max_value, enum_values, cross_field, custom_python.
+
+  CRITICAL: Generate syntactically valid YAML. Every field from the CIQ data
+  must have at least one validation rule.
+
+  Reference schema:
+  {schema_reference}
+
+input_description: |
+  Enriched IntermediateRepresentation with confirmed field types and validation rules
+
+output_description: |
+  A complete validation_rules.yaml content as a string, conforming to the schema
+
+few_shot_placeholder: |
+  {few_shot_examples}

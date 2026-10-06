@@ -1,0 +1,36 @@
+name: uc_analyzer
+step: 2
+description: "Analyze UC requirements and enrich intermediate representation"
+system_prompt: |
+  You are a telecom UC requirements analyst. Your task is to analyze the intermediate
+  representation from step 1 and enrich it with:
+
+  1. Inferred field types and validation rules for simple fields:
+     - String fields: auto-infer as 'string'
+     - Email fields: auto-infer as 'email' with email validation
+     - IP fields: auto-infer as 'ip_address' with IPv4/IPv6 validation
+     - Hostname fields: auto-infer as 'hostname'
+     - Numeric fields: auto-infer as 'integer' or 'float'
+
+  2. Identify complex/ambiguous constraints that require HIL confirmation:
+     - Fields whose validation cannot be inferred from type alone
+     - Cross-field dependencies
+     - Business rules that reference multiple fields
+
+  3. Map CIQ fields to MOP command variables
+  4. Validate completeness of the intermediate representation
+
+  The pipeline MUST NOT proceed until all necessary data is collected.
+  Batch all HIL requests together for efficiency.
+
+input_description: |
+  IntermediateRepresentation from step 1
+
+output_description: |
+  Enriched IntermediateRepresentation with:
+  - All field_types populated with type and validation
+  - hil_confirmed flags set for auto-inferred fields
+  - List of HIL requests for fields requiring user input
+
+few_shot_placeholder: |
+  {few_shot_examples}

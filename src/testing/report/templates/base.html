@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pipeline Test Report — {{ run.uc_name | default('Unknown UC') }}</title>
+    <style>
+        :root { --bg: #1a1a2e; --surface: #16213e; --text: #e8e8e8; --accent: #0f3460; --pass: #4caf50; --fail: #f44336; --warn: #ff9800; --border: #333; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); padding: 24px; line-height: 1.6; }
+        h1 { color: #fff; margin-bottom: 8px; } h2 { color: #ccc; margin: 24px 0 12px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+        .meta { color: #aaa; margin-bottom: 24px; }
+        .badge { display: inline-block; padding: 4px 12px; border-radius: 4px; font-weight: bold; font-size: 14px; }
+        .badge-pass { background: var(--pass); color: #fff; } .badge-fail { background: var(--fail); color: #fff; } .badge-cancelled { background: var(--warn); color: #000; }
+        table { width: 100%; border-collapse: collapse; margin: 12px 0; background: var(--surface); border-radius: 8px; overflow: hidden; }
+        th { background: var(--accent); padding: 12px; text-align: left; font-weight: 600; }
+        td { padding: 10px 12px; border-top: 1px solid var(--border); }
+        tr:hover { background: rgba(255,255,255,0.03); }
+        .status-passed { color: var(--pass); font-weight: bold; } .status-failed { color: var(--fail); font-weight: bold; } .status-retrying { color: var(--warn); }
+        details { background: var(--surface); border-radius: 8px; padding: 12px; margin: 8px 0; }
+        summary { cursor: pointer; font-weight: 600; padding: 4px; }
+        pre { background: #0d1117; padding: 16px; border-radius: 6px; overflow-x: auto; font-size: 13px; margin: 8px 0; }
+        .diff-add { color: var(--pass); } .diff-remove { color: var(--fail); } .diff-mod { color: var(--warn); }
+    </style>
+</head>
+<body>
+    <h1>Pipeline Test Report</h1>
+    <div class="meta">
+        <p><strong>UC:</strong> {{ run.uc_name | default('N/A') }}
+           <span class="badge {% if run.status == 'completed' %}badge-pass{% elif run.status == 'failed' %}badge-fail{% else %}badge-cancelled{% endif %}">{{ run.status | default('unknown') | upper }}</span></p>
+        <p><strong>Generated:</strong> {{ generated_at }}</p>
+        {% if run.duration_seconds %}<p><strong>Duration:</strong> {{ "%.1f"|format(run.duration_seconds) }}s</p>{% endif %}
+    </div>
+
+    <h2>Step Results</h2>
+    <table>
+        <tr><th>#</th><th>Step</th><th>Status</th><th>Duration</th><th>Retries</th><th>Error</th></tr>
+        {% for step in steps %}
+        <tr>
+            <td>{{ step.step_number }}</td>
+            <td>{{ step.step_name }}</td>
+            <td class="status-{{ step.status }}">{{ step.status }}</td>
+            <td>{{ step.duration | default('—') }}</td>
+            <td>{{ step.retry_count | default(0) }}</td>
+            <td>{{ step.error_message | default('') }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+
+    {% if regression_diff %}
+    <h2>Regression Diff</h2>
+    {% if not regression_diff.any_changed %}
+    <p style="color: var(--pass);">No changes detected compared to previous successful run.</p>
+    {% else %}
+    {% for config_type, diff in regression_diff.diffs.items() %}
+    <details>
+        <summary>{{ config_type }} — {{ diff.summary }}</summary>
+        {% if diff.additions %}<p class="diff-add">Additions: {{ diff.additions | length }}</p>{% endif %}
+        {% if diff.removals %}<p class="diff-remove">Removals: {{ diff.removals | length }}</p>{% endif %}
+        {% if diff.modifications %}<p class="diff-mod">Modifications: {{ diff.modifications | length }}</p>{% endif %}
+    </details>
+    {% endfor %}
+    {% endif %}
+    {% endif %}
+</body>
+</html>

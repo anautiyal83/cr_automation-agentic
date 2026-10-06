@@ -1,0 +1,28 @@
+type: object
+required: [uc_name, mock_entries]
+properties:
+  uc_name:
+    type: string
+  mock_entries:
+    type: array
+    items:
+      type: object
+      required: [command_pattern, response_template]
+      properties:
+        command_pattern:
+          type: string
+          description: Regex pattern matching the CLI command or REST endpoint
+        response_template:
+          type: string
+          description: "Simulated response with {variable} placeholders"
+        response_code:
+          type: integer
+          description: HTTP status code (for REST) or exit code (for CLI)
+          default: 0
+        delay_ms:
+          type: integer
+          description: Simulated response delay
+          default: 0
+        variables:
+          type: object
+          description: Variable values to inject in response template

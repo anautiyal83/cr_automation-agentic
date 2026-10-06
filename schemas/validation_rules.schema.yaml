@@ -1,0 +1,54 @@
+type: object
+required: [uc_name, version, fields]
+properties:
+  uc_name:
+    type: string
+    description: Use case identifier
+  version:
+    type: string
+    pattern: "^\\d+\\.\\d+\\.\\d+$"
+  fields:
+    type: array
+    items:
+      type: object
+      required: [name, type, validations]
+      properties:
+        name:
+          type: string
+          description: CIQ column header name
+        type:
+          type: string
+          enum: [string, integer, float, boolean, email, ip_address, ip_subnet, hostname, enum, date, phone]
+        required:
+          type: boolean
+          default: true
+        validations:
+          type: array
+          items:
+            type: object
+            required: [rule]
+            properties:
+              rule:
+                type: string
+                enum: [not_empty, regex, min_length, max_length, min_value, max_value, enum_values, cross_field, custom_python]
+              parameters:
+                type: object
+              error_message:
+                type: string
+  cross_field_rules:
+    type: array
+    items:
+      type: object
+      required: [name, fields, condition]
+      properties:
+        name:
+          type: string
+        fields:
+          type: array
+          items:
+            type: string
+        condition:
+          type: string
+          description: Python expression or rule reference
+        error_message:
+          type: string

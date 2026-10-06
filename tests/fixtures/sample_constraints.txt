@@ -1,0 +1,12 @@
+# Field Constraints
+| Field | Type | Constraint |
+|-------|------|------------|
+| Hostname | string | regex: ^[A-Z]{2}-[A-Z]{3}-\d{3}$ |
+| IP_Address | ip_address | valid IPv4 |
+| VLAN_ID | integer | range: 100-4094 |
+| Service_Code | string | regex: ^[A-Z]{2}\d{4}$ |
+
+# Business Rules
+- Hostname must be unique across all sites
+- VLAN_ID must not conflict with existing VLANs in the same location
+- Service_Code prefix must match the service type (VL for VoLTE, VN for VoNR)

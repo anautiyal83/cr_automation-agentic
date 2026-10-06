@@ -1,0 +1,46 @@
+openrouter_api_key: "${OPENROUTER_API_KEY}"
+
+models:
+  default: "openrouter/anthropic/claude-sonnet-4-20250514"
+  per_step:
+    1: null
+    2: null
+    3: null
+    4: null
+    5: null
+    6: null
+
+retry:
+  test_failure_limit: 3
+  infrastructure_limit: 3
+  infrastructure_backoff: 2.0
+
+external_modules:
+  ciq_processor_jar: "./lib/ciq-processor.jar"
+  cli_automation_jar: "./lib/cli-automation-standalone.jar"
+  java_home: null
+  subprocess_timeout: 300
+
+simulator:
+  endpoint: "localhost"
+  port: 8080
+
+storage:
+  database_path: "./data/pipeline.db"
+  artifacts_directory: "./data/runs"
+  knowledge_base_directory: "./data/knowledge"
+
+chunking:
+  ciq_rows_per_chunk: 100
+  max_context_tokens: 100000
+
+few_shot:
+  enabled: true
+  top_k: 3
+  embedding_model: "all-MiniLM-L6-v2"
+
+ui:
+  host: "0.0.0.0"
+  port: 8000
+  dark_mode: true
+  title: "CR Automation Agentic"

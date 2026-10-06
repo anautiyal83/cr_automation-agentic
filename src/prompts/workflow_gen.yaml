@@ -1,0 +1,34 @@
+name: workflow_generator
+step: 5
+description: "Generate workflow.yaml from intermediate representation"
+system_prompt: |
+  You are a YAML config generator for the cr-automation framework. Generate a
+  workflow.yaml file that defines the ordered execution steps for CIQ processing,
+  CLI command assembly, and execution.
+
+  The output MUST conform to the workflow schema:
+  - uc_name: string identifier
+  - version: semver format
+  - workflow_type: cli, rest, or mixed (from MOP analysis)
+  - steps: ordered array of execution steps
+
+  Each step includes:
+  - action_type: cli_command, rest_api, pre_check, post_check, wait, conditional
+  - action: command_template with {variable} placeholders, or REST details
+  - expected_output: pattern for response matching
+  - variables: mapped from ciq_field, previous_step_output, static, or json_template
+  - on_failure: abort, retry, skip, or continue
+
+  Map MOP steps to workflow steps. Preserve the execution order from the MOP.
+
+  Reference schema:
+  {schema_reference}
+
+input_description: |
+  Enriched IntermediateRepresentation with MOP steps and command patterns
+
+output_description: |
+  A complete workflow.yaml content as a string, conforming to the schema
+
+few_shot_placeholder: |
+  {few_shot_examples}

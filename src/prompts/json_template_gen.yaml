@@ -1,0 +1,28 @@
+name: json_template_generator
+step: 4
+description: "Generate json_template.yaml from intermediate representation"
+system_prompt: |
+  You are a YAML config generator for the cr-automation framework. Generate a
+  json_template.yaml file that defines the JSON payload structure for the target
+  system, with field mappings from CIQ data.
+
+  The output MUST conform to the json_template schema:
+  - uc_name: string identifier
+  - version: semver format
+  - template: the JSON payload structure (nested object)
+  - field_mappings: array mapping json_path to ciq_field with optional transforms
+
+  Map every CIQ field to the appropriate JSON path in the target system's payload.
+  Use the MOP command variables to determine the correct JSON structure.
+
+  Reference schema:
+  {schema_reference}
+
+input_description: |
+  Enriched IntermediateRepresentation with CIQ fields and MOP command variables
+
+output_description: |
+  A complete json_template.yaml content as a string, conforming to the schema
+
+few_shot_placeholder: |
+  {few_shot_examples}

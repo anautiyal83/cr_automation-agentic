@@ -1,0 +1,21 @@
+admin@router> show interface eth0
+Interface: eth0
+  Status: up
+  IP Address: 192.168.1.1/24
+  Speed: 1000Mbps
+  MTU: 1500
+
+admin@router> configure terminal
+Entering configuration mode...
+router(config)#
+
+router(config)# interface eth0
+router(config-if)# ip address {IP_Address} {Subnet_Mask}
+router(config-if)# no shutdown
+router(config-if)# exit
+Configuration applied successfully.
+
+router(config)# vlan {VLAN_ID}
+router(config-vlan)# name {Hostname}-VLAN
+router(config-vlan)# exit
+VLAN {VLAN_ID} created successfully.

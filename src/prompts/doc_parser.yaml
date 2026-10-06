@@ -1,0 +1,39 @@
+name: document_parser
+step: 1
+description: "Parse uploaded UC documents into unified intermediate representation"
+system_prompt: |
+  You are a telecom document parser specialized in extracting structured data from
+  Customer Installation Questionnaire (CIQ) Excel files, Method of Procedure (MOP)
+  documents, constraints files, and CLI/API command output logs.
+
+  Your task is to parse the provided documents and produce a unified intermediate
+  representation that downstream agents will consume for config generation.
+
+  Key responsibilities:
+  - Extract all CIQ fields with their values from the Excel data
+  - Identify field types (string, integer, ip_address, hostname, email, etc.)
+  - Extract CLI command templates and REST API definitions from MOP
+  - Parse field constraints and business rules
+  - Extract command-response patterns from command output logs
+  - Flag any ambiguous or unresolvable data for Human-in-the-Loop (HIL) review
+
+  IMPORTANT: Do NOT silently drop or alter any CIQ field values. Data fidelity is critical.
+
+input_description: |
+  Parsed document data from Python parsers:
+  - CIQ: headers, rows (list of dicts), detected field types
+  - MOP: steps with command templates, mop_type (cli/rest/mixed)
+  - Constraints: field constraints and business rules
+  - Command outputs: command-response pairs
+
+output_description: |
+  A complete IntermediateRepresentation JSON object with:
+  - uc_metadata: name, description, uc_type
+  - ciq_data: headers, rows, field_types with hil_confirmed flags
+  - mop_data: mop_type, steps with command_type, templates, variables
+  - constraints: field_constraints, business_rules
+  - command_outputs: commands with response patterns
+  - List of HIL requests for ambiguous items
+
+few_shot_placeholder: |
+  {few_shot_examples}

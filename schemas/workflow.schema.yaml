@@ -1,0 +1,74 @@
+type: object
+required: [uc_name, version, workflow_type, steps]
+properties:
+  uc_name:
+    type: string
+  version:
+    type: string
+    pattern: "^\\d+\\.\\d+\\.\\d+$"
+  workflow_type:
+    type: string
+    enum: [cli, rest, mixed]
+  steps:
+    type: array
+    items:
+      type: object
+      required: [step_number, name, action_type, action]
+      properties:
+        step_number:
+          type: integer
+        name:
+          type: string
+        action_type:
+          type: string
+          enum: [cli_command, rest_api, pre_check, post_check, wait, conditional]
+        action:
+          type: object
+          properties:
+            command_template:
+              type: string
+              description: "CLI command with {variable} placeholders"
+            method:
+              type: string
+              enum: [GET, POST, PUT, DELETE, PATCH]
+            url_template:
+              type: string
+            headers:
+              type: object
+            body_template:
+              type: object
+            variables:
+              type: array
+              items:
+                type: object
+                required: [name, source]
+                properties:
+                  name:
+                    type: string
+                  source:
+                    type: string
+                    enum: [ciq_field, previous_step_output, static, json_template]
+                  value:
+                    type: string
+        expected_output:
+          type: object
+          properties:
+            pattern:
+              type: string
+              description: Regex or template for response matching
+            success_indicator:
+              type: string
+            error_indicators:
+              type: array
+              items:
+                type: string
+        on_failure:
+          type: string
+          enum: [abort, retry, skip, continue]
+          default: abort
+        timeout_seconds:
+          type: integer
+          default: 60
+  rollback_steps:
+    type: array
+    description: Steps to execute on workflow failure

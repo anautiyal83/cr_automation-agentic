@@ -1,0 +1,41 @@
+# Per-step LLM model assignments
+# Steps 1-6 use LLM agents; null means use default model
+# Steps 7-9 are deterministic (no LLM) — entries here are informational only
+
+steps:
+  1:
+    name: "Document Parser"
+    model: null
+    uses_llm: true
+  2:
+    name: "UC Analyzer"
+    model: null
+    uses_llm: true
+  3:
+    name: "Validation Rules Generator"
+    model: null
+    uses_llm: true
+  4:
+    name: "JSON Template Generator"
+    model: null
+    uses_llm: true
+  5:
+    name: "Workflow Generator"
+    model: null
+    uses_llm: true
+  6:
+    name: "Script + Simulator Config Generator"
+    model: null
+    uses_llm: true
+  7:
+    name: "Schema Validator"
+    model: null
+    uses_llm: false
+  8:
+    name: "Test Executor"
+    model: null
+    uses_llm: false
+  9:
+    name: "Report Generator"
+    model: null
+    uses_llm: false

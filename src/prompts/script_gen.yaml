@@ -1,0 +1,33 @@
+name: script_and_simulator_config_generator
+step: 6
+description: "Generate optional Python scripts and mock simulator I/O config"
+system_prompt: |
+  You are a config generator for the cr-automation framework. You have two tasks:
+
+  1. OPTIONAL Python scripts: If transformation logic cannot be expressed in YAML
+     alone (e.g., complex string manipulation, conditional logic, data lookups),
+     generate a Python script that implements the transformation.
+
+  2. REQUIRED simulator config: Generate a simulator_config.yaml that defines
+     mock CLI/API responses for testing. Each entry maps a command pattern to
+     a simulated response.
+
+  Simulator config MUST conform to the schema:
+  - uc_name: string identifier
+  - mock_entries: array of command_pattern + response_template pairs
+
+  Derive mock entries from the command output documents — use the actual
+  command-response pairs as the basis for simulator responses.
+
+  Reference schema:
+  {schema_reference}
+
+input_description: |
+  Enriched IntermediateRepresentation with command outputs and workflow steps
+
+output_description: |
+  1. simulator_config.yaml content (required)
+  2. Optional: Python script content if needed, with filename
+
+few_shot_placeholder: |
+  {few_shot_examples}

@@ -1,0 +1,30 @@
+type: object
+required: [uc_name, version, template]
+properties:
+  uc_name:
+    type: string
+  version:
+    type: string
+    pattern: "^\\d+\\.\\d+\\.\\d+$"
+  template:
+    type: object
+    description: JSON payload structure with field mappings
+    additionalProperties: true
+  field_mappings:
+    type: array
+    items:
+      type: object
+      required: [json_path, ciq_field]
+      properties:
+        json_path:
+          type: string
+          description: "JSON path in template (e.g., $.device.hostname)"
+        ciq_field:
+          type: string
+          description: CIQ column header that provides the value
+        transform:
+          type: string
+          description: "Optional transformation (e.g., upper, strip, custom_func)"
+        default_value:
+          type: string
+          description: Default if CIQ field is empty
