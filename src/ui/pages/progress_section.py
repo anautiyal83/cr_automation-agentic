@@ -107,6 +107,10 @@ class ProgressSection:
                     self.ms_continue_btn = ui.button("Continue", icon="play_arrow",
                         on_click=lambda: self._milestone_respond("continue")) \
                         .props("unelevated color=positive size=sm no-caps")
+                    self.ms_skip_btn = ui.button("Skip & Continue", icon="skip_next",
+                        on_click=lambda: self._milestone_respond("continue")) \
+                        .props("unelevated color=warning size=sm no-caps")
+                    self.ms_skip_btn.set_visibility(False)
                     self.ms_rerun_btn = ui.button("Re-run Step", icon="replay",
                         on_click=lambda: self._milestone_respond("rerun")) \
                         .props("unelevated color=deep-purple-6 size=sm no-caps")
@@ -229,7 +233,21 @@ class ProgressSection:
                     candidate = Path(run_dir) / fname
                     if candidate.exists():
                         artifact_file = str(candidate)
-                self._show_milestone_review(step, milestone_name, artifact_file)
+                # For test steps, check if there were failures
+                has_failures = False
+                if step in (5, 8):
+                    try:
+                        step_rows = await db.execute(
+                            "SELECT status FROM step_results WHERE run_id = ? AND step_number = ?",
+                            (str(run_id), step),
+                        )
+                        if step_rows and "failed" in str(step_rows[0].get("status", "")).lower():
+                            has_failures = True
+                    except Exception:
+                        pass
+
+                self._show_milestone_review(step, milestone_name, artifact_file,
+                                            has_failures=has_failures)
                 event_bus.subscribe(self._on_event, run_id)
             elif status == "paused_hil":
                 self.status_icon.name = "help_outline"
@@ -304,14 +322,15 @@ class ProgressSection:
             test_status = event.payload.get("test_status")
 
             # Step 5 test results: show pass/fail visual
-            if test_status == "failed":
+            has_failures = test_status == "failed"
+            if has_failures:
                 self._update_step_visual(event.step_number, "failed")
                 self.status_icon.name = "error_outline"
                 self.status_icon.classes(replace="cr-text-error")
                 if event.step_number == 5:
-                    self.status_detail.text = "Tests failed — review results, then re-run (regenerates Steps 3-4) or continue."
+                    self.status_detail.text = "Tests failed — re-run to fix, or skip to continue."
                 elif event.step_number == 8:
-                    self.status_detail.text = "Tests failed — review results, then re-run (regenerates Steps 6-7) or continue."
+                    self.status_detail.text = "Tests failed — re-run to fix, or skip to continue."
                 else:
                     self.status_detail.text = "Tests failed — review results below."
                 self.banner.style(replace=(
@@ -329,7 +348,8 @@ class ProgressSection:
             self.progress_bar.value = event.step_number / 9
             self.progress_bar.props(remove="animate")
             self.status_label.text = f"Review: {milestone}"
-            self._show_milestone_review(event.step_number, milestone, artifact_file)
+            self._show_milestone_review(event.step_number, milestone, artifact_file,
+                                        has_failures=has_failures)
         elif event.event_type == "run_completed":
             self.status_icon.name = "check_circle"
             self.status_icon.classes(replace="cr-text-success")
@@ -379,7 +399,8 @@ class ProgressSection:
         if base in ("passed", "in_progress") and "connector" in w:
             w["connector"].style(replace=f"background: {cfg['color']}")
 
-    def _show_milestone_review(self, step_num: int, milestone: str, artifact_file: str):
+    def _show_milestone_review(self, step_num: int, milestone: str, artifact_file: str,
+                               has_failures: bool = False):
         self.milestone_row.set_visibility(True)
         self.action_btns.set_visibility(False)
         self._current_artifact_file = artifact_file
@@ -392,6 +413,15 @@ class ProgressSection:
             self.ms_rerun_btn.text = "Re-run Steps 6-8"
         else:
             self.ms_rerun_btn.text = "Re-run Step"
+
+        # For test steps with failures: disable Continue, show Skip & Continue
+        if has_failures and step_num in (5, 8):
+            self.ms_continue_btn.set_visibility(False)
+            self.ms_skip_btn.set_visibility(True)
+        else:
+            self.ms_continue_btn.set_visibility(True)
+            self.ms_skip_btn.set_visibility(False)
+
         from pathlib import Path
         fname = Path(artifact_file).name if artifact_file else "unknown"
         self.ms_artifact_label.text = f"{milestone}  —  {fname}"
