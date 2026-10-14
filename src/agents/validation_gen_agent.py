@@ -118,6 +118,40 @@ class ValidationGenAgent:
                 "Fix the issues and regenerate."
             )
 
+        # QA feedback from Step 5 — failed test cases from previous run
+        qa_feedback = ""
+        qa_data = input_data.get("qa_feedback", [])
+        if qa_data:
+            qa_lines = [
+                "\n\n=== QA TEST FEEDBACK (from previous Step 5 run) ===",
+                "The following test cases FAILED during CIQ validation QA.",
+                "Fix the validation rules to address these issues:\n",
+            ]
+            for tc in qa_data:
+                tc_id = tc.get("id", "?")
+                scenario = tc.get("scenario", "")
+                expected = tc.get("expected", "")
+                actual = tc.get("actual", "")
+                remarks = tc.get("remarks", "")
+                qa_lines.append(f"  [{tc_id}] {scenario}")
+                qa_lines.append(f"    Expected: {expected}, Actual: {actual}")
+                qa_lines.append(f"    Remarks: {remarks}")
+                # Include JAR stderr for context
+                stderr = tc.get("stderr", "").strip()
+                if stderr:
+                    qa_lines.append(f"    JAR error: {stderr[:500]}")
+                qa_lines.append("")
+
+            qa_lines.append(
+                "IMPORTANT: Adjust the validation rules so that ALL test cases pass.\n"
+                "- If a negative test (expected FAIL) passed instead, the rule is too lenient — tighten it.\n"
+                "- If a positive test (expected PASS) failed instead, the rule is too strict — relax it.\n"
+                "- For 'optional fields blank' tests: columns involved in one_of/minOnePerGroup "
+                "row rules are NOT truly optional — mark them required:false but ensure the "
+                "row-level rules still make sense when individual columns are blank.\n"
+            )
+            qa_feedback = "\n".join(qa_lines)
+
         uc_name = input_data.get("uc_name", "UC")
         parts = uc_name.split("_", 1)
         node_type = parts[0] if len(parts) == 2 else uc_name
@@ -229,7 +263,7 @@ report_output:
 
             f"=== SCHEMA REFERENCE (column types, workbook_rules, etc.) ===\n{schema[:8000]}\n\n"
 
-            f"{few_shot_text}{retry_info}\n\n"
+            f"{few_shot_text}{retry_info}{qa_feedback}\n\n"
 
             "=== GENERATION INSTRUCTIONS ===\n\n"
 

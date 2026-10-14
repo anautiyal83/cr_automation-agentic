@@ -110,6 +110,57 @@ class PipelineOrchestrator:
             "answered_at": datetime.now(timezone.utc).isoformat(),
         })
 
+    async def resume_run(self, run_id: UUID, from_step: int = 1) -> PipelineRun:
+        """Resume an orphaned pipeline run from a specific step.
+
+        Re-uses the existing run and document set, launching the pipeline
+        from the given step instead of creating a new run.
+        """
+        old_run = await self.db.get_by_id("pipeline_runs", str(run_id))
+        if not old_run:
+            raise ValueError(f"Run {run_id} not found")
+
+        doc_set_id = old_run.get("document_set_id")
+        doc_row = await self.db.get_by_id("uc_document_sets", str(doc_set_id))
+        if not doc_row:
+            raise ValueError(f"Document set {doc_set_id} not found")
+
+        doc_set = UCDocumentSet(
+            id=UUID(str(doc_set_id)),
+            uc_name=doc_row["uc_name"],
+            ciq_file_path=doc_row["ciq_file_path"],
+            mop_file_path=doc_row["mop_file_path"],
+            sample_io_xml_paths=json.loads(doc_row["sample_io_xml_paths"]) if doc_row.get("sample_io_xml_paths") else [],
+            constraints_file_path=doc_row.get("constraints_file_path"),
+            command_outputs_path=doc_row["command_outputs_path"],
+            additional_documents=json.loads(doc_row["additional_documents"]) if doc_row.get("additional_documents") else None,
+            validated=True,
+        )
+
+        run = PipelineRun(
+            id=run_id,
+            document_set_id=doc_set.id,
+            config_snapshot=json.loads(old_run["config_snapshot"]) if isinstance(old_run.get("config_snapshot"), str) else old_run.get("config_snapshot", {}),
+        )
+
+        # Update run status back to running
+        await self.db.update("pipeline_runs", str(run_id), {
+            "status": PipelineStatus.RUNNING.value,
+        })
+
+        # Clean step results from from_step onward
+        await self.db.execute_insert(
+            "DELETE FROM step_results WHERE run_id = ? AND step_number >= ?",
+            (str(run_id), from_step),
+        )
+
+        # Launch pipeline from the specified step
+        task = asyncio.create_task(
+            self._execute_pipeline(run, doc_set, review_milestones=True, start_from_step=from_step)
+        )
+        self._active_tasks[run.id] = task
+        return run
+
     async def rerun(self, run_id: UUID) -> PipelineRun:
         """Re-run a previous pipeline using its original document set."""
         # Get the old run to find its document_set_id
@@ -156,8 +207,9 @@ class PipelineOrchestrator:
         return await self.db.execute(sql, tuple(vals))
 
     async def _execute_pipeline(self, run: PipelineRun, doc_set: UCDocumentSet,
-                                review_milestones: bool = True) -> None:
-        """Execute all 9 pipeline steps sequentially."""
+                                review_milestones: bool = True,
+                                start_from_step: int = 1) -> None:
+        """Execute pipeline steps sequentially, optionally resuming from a given step."""
         try:
             # Refresh config from ConfigManager to pick up settings changes made via UI
             if self.config_manager is not None:
@@ -167,10 +219,13 @@ class PipelineOrchestrator:
                     pass  # fall back to existing config
 
             run.status = PipelineStatus.RUNNING
-            run.started_at = datetime.now(timezone.utc)
+            if start_from_step <= 1:
+                run.started_at = datetime.now(timezone.utc)
+            else:
+                run.started_at = run.started_at or datetime.now(timezone.utc)
             await self.db.update("pipeline_runs", str(run.id), {
                 "status": run.status.value,
-                "started_at": run.started_at.isoformat(),
+                "started_at": run.started_at.isoformat() if run.started_at else datetime.now(timezone.utc).isoformat(),
             })
 
             # Set API key in environment for liteLLM
@@ -206,7 +261,13 @@ class PipelineOrchestrator:
                 "ciq_file_path": doc_set.ciq_file_path,
             }
 
-            step_num = 0
+            # When resuming from a later step, rebuild step_data from saved artifacts
+            if start_from_step > 1:
+                step_data = await self._rebuild_step_data(
+                    run.id, doc_set, run_dir, step_data, start_from_step,
+                )
+
+            step_num = start_from_step - 1  # will increment at top of loop
             while step_num < 9:
                 step_num += 1
 
@@ -434,7 +495,15 @@ class PipelineOrchestrator:
 
                             if step_num == 5:
                                 # Step 5 rerun: go back to step 3 to re-generate
-                                # validation rules + JSON output, then re-test
+                                # validation rules + JSON output, then re-test.
+                                # Preserve QA results as feedback for Step 3 LLM.
+                                qa_results = step_data.get("ciq_test_results", {})
+                                failed_tcs = [
+                                    tc for tc in qa_results.get("test_cases", [])
+                                    if tc.get("status") == "FAIL"
+                                ]
+                                if failed_tcs:
+                                    step_data["qa_feedback"] = failed_tcs
                                 step_data.get("artifacts", {}).pop("validation_rules_yaml", None)
                                 step_data.get("artifacts", {}).pop("json_template_yaml", None)
                                 step_data.pop("ciq_test_results", None)
@@ -547,6 +616,55 @@ class PipelineOrchestrator:
             ))
         finally:
             self._active_tasks.pop(run.id, None)
+
+    async def _rebuild_step_data(
+        self, run_id: UUID, doc_set: UCDocumentSet,
+        run_dir: Path, step_data: dict, start_from_step: int,
+    ) -> dict:
+        """Rebuild step_data from saved artifacts when resuming a run mid-pipeline."""
+        uc_name = doc_set.uc_name
+
+        # Reload intermediate repr from DB
+        run_row = await self.db.get_by_id("pipeline_runs", str(run_id))
+        if run_row and run_row.get("intermediate_repr"):
+            try:
+                ir = json.loads(run_row["intermediate_repr"]) if isinstance(run_row["intermediate_repr"], str) else run_row["intermediate_repr"]
+                step_data["intermediate_repr"] = ir
+                if isinstance(ir, dict):
+                    for ir_key in ("uc_metadata", "ciq_data", "mop_data",
+                                   "constraints", "command_outputs",
+                                   "simulator_config", "field_types"):
+                        if ir_key in ir:
+                            step_data[ir_key] = ir[ir_key]
+            except Exception:
+                pass
+
+        # Reload YAML artifacts from disk
+        artifacts = {}
+        artifact_files = {
+            "validation_rules_yaml": f"{uc_name}_validation-rules.yaml",
+            "json_template_yaml": f"{uc_name}_json-output.yaml",
+            "workflow_yaml": f"{uc_name}.yaml",
+            "simulator_config_yaml": f"{uc_name}_simulator-config.yaml",
+        }
+        for key, fname in artifact_files.items():
+            fpath = run_dir / fname
+            if fpath.exists():
+                artifacts[key] = fpath.read_text(encoding="utf-8")
+
+        # Clear artifacts that will be regenerated
+        if start_from_step <= 3:
+            artifacts.pop("validation_rules_yaml", None)
+            artifacts.pop("json_template_yaml", None)
+        if start_from_step <= 6:
+            artifacts.pop("workflow_yaml", None)
+            artifacts.pop("simulator_config_yaml", None)
+
+        step_data["artifacts"] = artifacts
+
+        logger.info("Rebuilt step_data for resume from step %d: artifacts=%s",
+                     start_from_step, list(artifacts.keys()))
+        return step_data
 
     def _create_agents(self) -> dict:
         from src.agents.doc_parser_agent import DocParserAgent

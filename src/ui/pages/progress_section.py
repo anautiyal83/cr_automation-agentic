@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime, timezone
 from uuid import UUID
+
+logger = logging.getLogger(__name__)
 
 from nicegui import ui, context
 
@@ -215,7 +218,7 @@ class ProgressSection:
                 artifact_map = {
                     3: f"{uc_name}_validation-rules.yaml",
                     4: f"{uc_name}_json-output.yaml",
-                    5: f"{uc_name}_ciq-test-report.html",
+                    5: "qa/qa-execution-report.html",
                     6: f"{uc_name}.yaml",
                     7: f"{uc_name}_simulator-config.yaml",
                     8: f"{uc_name}_exec-test-results.txt",
@@ -443,23 +446,35 @@ class ProgressSection:
         # Live check: is the pipeline task actually waiting for our response?
         has_live_event = self.active_run_id in self.orchestrator._milestone_events
         if not has_live_event:
-            # Pipeline task is gone (server restart) — handle gracefully
+            # Pipeline task is gone (server restart) — resume from correct step
             if decision == "cancel":
                 await self.orchestrator.db.update("pipeline_runs", str(self.active_run_id), {
                     "status": "cancelled",
                     "completed_at": datetime.now(timezone.utc).isoformat(),
                 })
                 self._reset_to_default()
-                ui.notify("Pipeline cancelled (was stale from server restart)", type="warning")
+                ui.notify("Pipeline cancelled", type="warning")
                 return
             else:
-                # Re-run the pipeline from scratch since the task is gone
+                # Determine resume step based on current milestone and decision
+                run_row = await self.orchestrator.db.get_by_id(
+                    "pipeline_runs", str(self.active_run_id))
+                current_step = run_row.get("current_step", 1) if run_row else 1
+
+                if decision == "rerun":
+                    # Go back to regenerate: step 5→3, step 8→6, others→same step
+                    resume_step = {5: 3, 8: 6}.get(current_step, current_step)
+                else:
+                    # Continue: resume from next step
+                    resume_step = current_step + 1
+
                 try:
-                    new_run = await self.orchestrator.rerun(self.active_run_id)
-                    await self.start_tracking(new_run.id)
-                    ui.notify("Pipeline restarted (previous run was stale)", type="positive")
+                    resumed = await self.orchestrator.resume_run(
+                        self.active_run_id, from_step=resume_step)
+                    await self.start_tracking(resumed.id)
+                    ui.notify(f"Pipeline resumed from step {resume_step}", type="positive")
                 except Exception as exc:
-                    ui.notify(f"Re-run failed: {exc}", type="negative")
+                    ui.notify(f"Resume failed: {exc}", type="negative")
                 return
 
         await self.orchestrator.respond_to_milestone(self.active_run_id, decision)
