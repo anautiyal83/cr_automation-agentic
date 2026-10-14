@@ -231,8 +231,57 @@ data:
         response = await call_llm(prompt, system_prompt=system, model=model)
         yaml_content = _extract_yaml(response)
 
+        # Fix common YAML quoting issues
+        yaml_content = _fix_yaml_quoting(yaml_content)
+
+        # Validate YAML syntax — return failed so retry can re-generate
+        try:
+            _validate_yaml(yaml_content)
+        except Exception as e:
+            logger.warning("Generated json-output YAML is invalid: %s", e)
+            return StepOutput(
+                status="failed",
+                error={"message": f"Generated YAML has syntax errors: {e}"},
+                output_data={"json_template_yaml": yaml_content},
+            )
+
         return StepOutput(
             status="passed",
             output_data={"json_template_yaml": yaml_content},
             artifacts=[],
         )
+
+
+def _fix_yaml_quoting(yaml_text: str) -> str:
+    """Fix common YAML quoting issues for SnakeYAML.
+
+    Fixes single-quoted dotted refs: 'Sheet Name'.'Column' → "Sheet Name.Column"
+    """
+    # Fix 'Sheet Name'.'Column Name' → "Sheet Name.Column Name"
+    yaml_text = re.sub(
+        r"'([^']+)'\.('([^']+)'|(\S+))",
+        lambda m: f'"{m.group(1)}.{m.group(3) or m.group(4)}"',
+        yaml_text,
+    )
+    # Fix "Sheet Name"."Column Name" → "Sheet Name.Column Name"
+    yaml_text = re.sub(
+        r'"([^"]+)"\."([^"]+)"',
+        r'"\1.\2"',
+        yaml_text,
+    )
+    # Fix "Sheet Name".Column → "Sheet Name.Column"
+    yaml_text = re.sub(
+        r'"([^"]+)"\.(\S+)',
+        r'"\1.\2"',
+        yaml_text,
+    )
+    return yaml_text
+
+
+def _validate_yaml(yaml_text: str) -> str:
+    """Validate YAML syntax."""
+    from ruamel.yaml import YAML
+    from io import StringIO
+    yaml = YAML()
+    yaml.load(StringIO(yaml_text))
+    return yaml_text

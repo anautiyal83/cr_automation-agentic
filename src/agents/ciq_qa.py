@@ -276,8 +276,24 @@ def generate_test_ciq(
                 continue
             ws = wb[sheet_name]
             columns = sheet_def.get("columns", {}) or {}
+            sheet_rules = sheet_def.get("rules", []) or []
+
+            # Collect columns protected by row-level rules
+            protected: set[str] = set()
+            for rule in sheet_rules:
+                if isinstance(rule, dict):
+                    for key in ("unique_key", "one_of", "all_or_none"):
+                        if key in rule and isinstance(rule[key], list):
+                            protected.update(str(c) for c in rule[key])
+            # Columns with minOnePerGroup are also protected
+            for col_name, col_def in columns.items():
+                if isinstance(col_def, dict) and col_def.get("minOnePerGroup"):
+                    protected.add(col_name)
+
             for col_name, col_def in columns.items():
                 if isinstance(col_def, dict) and not col_def.get("required", False):
+                    if col_name in protected:
+                        continue  # skip — clearing would break row rules
                     col_idx = _find_column_index(ws, col_name)
                     if col_idx is not None:
                         for row in range(2, ws.max_row + 1):

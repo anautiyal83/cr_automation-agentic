@@ -59,6 +59,139 @@ def _validate_yaml(yaml_text: str) -> str:
     return yaml_text
 
 
+def _validate_against_ciq(yaml_text: str, ciq_path: str) -> list[str]:
+    """Check that sheet/column names in validation rules match the actual CIQ.
+
+    Returns a list of mismatch descriptions, empty if all OK.
+    """
+    import openpyxl
+    from ruamel.yaml import YAML
+    from io import StringIO
+
+    yaml = YAML()
+    rules = yaml.load(StringIO(yaml_text))
+    if not isinstance(rules, dict):
+        return []
+
+    # Read actual CIQ structure
+    try:
+        wb = openpyxl.load_workbook(ciq_path, read_only=True, data_only=True)
+    except Exception:
+        return []  # can't validate — skip
+
+    ciq_sheets: dict[str, list[str]] = {}
+    for sn in wb.sheetnames:
+        ws = wb[sn]
+        headers = []
+        for cell in next(ws.iter_rows(min_row=1, max_row=1), []):
+            if cell.value:
+                headers.append(str(cell.value).strip())
+        ciq_sheets[sn.lower()] = headers
+        ciq_sheets[sn] = headers  # keep original case too
+    wb.close()
+
+    # Build case-insensitive lookup
+    ciq_sheet_names_lower = {s.lower(): s for s in wb.sheetnames}
+    ciq_columns_lower: dict[str, dict[str, str]] = {}  # sheet_lower → {col_lower: col_original}
+    for sn in wb.sheetnames:
+        ciq_columns_lower[sn.lower()] = {
+            h.lower(): h for h in ciq_sheets.get(sn, [])
+        }
+
+    mismatches = []
+    sheets_def = rules.get("sheets", {}) or {}
+
+    # Check completeness — every CIQ sheet must be in the rules
+    rules_sheets_lower = {s.lower() for s in sheets_def}
+    for ciq_sn in wb.sheetnames:
+        if ciq_sn.lower() not in rules_sheets_lower:
+            cols = ciq_sheets.get(ciq_sn, [])
+            mismatches.append(
+                f"CIQ sheet '{ciq_sn}' is MISSING from rules. "
+                f"You must add it with columns: {cols}"
+            )
+
+    # Check each sheet in rules
+    for sheet_name, sheet_def in sheets_def.items():
+        sn_lower = sheet_name.lower()
+        if sn_lower not in ciq_sheet_names_lower:
+            mismatches.append(
+                f"Sheet '{sheet_name}' in rules not found in CIQ. "
+                f"Available sheets: {list(wb.sheetnames)}"
+            )
+            continue
+
+        if not isinstance(sheet_def, dict):
+            continue
+        columns = sheet_def.get("columns", {}) or {}
+        actual_cols = ciq_columns_lower.get(sn_lower, {})
+        actual_sheet = ciq_sheet_names_lower[sn_lower]
+
+        # Check for wrong column names
+        for col_name in columns:
+            if col_name.lower() not in actual_cols:
+                mismatches.append(
+                    f"Column '{col_name}' in sheet '{sheet_name}' not found in CIQ. "
+                    f"Available columns in '{actual_sheet}': {ciq_sheets.get(actual_sheet, [])}"
+                )
+
+        # Check completeness — every CIQ column should be in the rules
+        for actual_col in ciq_sheets.get(actual_sheet, []):
+            if actual_col.lower() not in {c.lower() for c in columns}:
+                mismatches.append(
+                    f"CIQ column '{actual_col}' in sheet '{actual_sheet}' is MISSING from rules. Add it."
+                )
+
+    # Check required columns against actual CIQ data — required columns must not have blanks
+    try:
+        wb2 = openpyxl.load_workbook(ciq_path, read_only=True, data_only=True)
+        for sheet_name, sheet_def in sheets_def.items():
+            if not isinstance(sheet_def, dict):
+                continue
+            sn_lower = sheet_name.lower()
+            actual_sn = ciq_sheet_names_lower.get(sn_lower)
+            if not actual_sn or actual_sn not in wb2.sheetnames:
+                continue
+            ws = wb2[actual_sn]
+            columns = sheet_def.get("columns", {}) or {}
+            # Read headers
+            header_row = list(next(ws.iter_rows(min_row=1, max_row=1), []))
+            header_map = {}
+            for idx, cell in enumerate(header_row):
+                if cell.value:
+                    header_map[str(cell.value).strip().lower()] = idx
+
+            for col_name, col_def in columns.items():
+                if not isinstance(col_def, dict) or not col_def.get("required"):
+                    continue
+                col_lower = col_name.lower()
+                if col_lower not in header_map:
+                    continue
+                col_idx = header_map[col_lower]
+                # Check if any non-blank data row has a blank value in this column
+                has_blank = False
+                for row in ws.iter_rows(min_row=2, values_only=True):
+                    # Skip fully blank rows (ignoreBlankRows: true)
+                    if not any(c is not None and str(c).strip() for c in row):
+                        continue
+                    if col_idx < len(row):
+                        val = row[col_idx]
+                        if val is None or (isinstance(val, str) and not val.strip()):
+                            has_blank = True
+                            break
+                if has_blank:
+                    mismatches.append(
+                        f"Column '{col_name}' in sheet '{sheet_name}' is marked required:true "
+                        f"but has blank values in CIQ data. Change to required:false "
+                        f"(use a one_of or row rule if at least one of a group must be filled)."
+                    )
+        wb2.close()
+    except Exception:
+        pass
+
+    return mismatches
+
+
 class ValidationGenAgent:
     step_number = 3
     step_name = "Validation Rules Generator"
@@ -94,16 +227,22 @@ class ValidationGenAgent:
 
         if per_sheet:
             ciq_summary_parts = [f"CIQ Workbook Sheets: {sheet_names}\n"]
+            # Build a strict column map for emphasis
+            column_map_parts = [
+                "*** EXACT COLUMN NAMES (you MUST use these, not the example's) ***"
+            ]
             for sname, sdata in per_sheet.items():
                 headers = sdata.get("headers", []) if isinstance(sdata, dict) else getattr(sdata, "headers", [])
                 samples = sdata.get("sample_rows", []) if isinstance(sdata, dict) else getattr(sdata, "sample_rows", [])
+                column_map_parts.append(f'  Sheet "{sname}" → columns: {headers}')
                 ciq_summary_parts.append(f'\nSheet: "{sname}"\n  Columns: {headers}')
                 if samples:
                     ciq_summary_parts.append(f"  Sample rows ({len(samples)}):")
                     for r in samples[:3]:
                         vals = {k: v for k, v in (r.items() if isinstance(r, dict) else r) if v}
                         ciq_summary_parts.append(f"    {vals}")
-            ir_summary = "\n".join(ciq_summary_parts)
+            column_map_parts.append("*** DO NOT use column names from the example — use ONLY the names above ***\n")
+            ir_summary = "\n".join(column_map_parts) + "\n\n" + "\n".join(ciq_summary_parts)
         else:
             ir_summary = json.dumps(
                 {k: input_data.get(k) for k in ("uc_metadata", "ciq_data")},
@@ -158,7 +297,9 @@ class ValidationGenAgent:
         activity = parts[1] if len(parts) == 2 else ""
 
         # Real example for few-shot (embedded)
-        example = '''# Example: SBC_33_LIC_LOADING_IN_SBC_validation-rules.yaml
+        # NOTE: column names (Node, NIAM NAME, etc.) are from a DIFFERENT UC — not this one
+        example = '''# Example from a DIFFERENT UC (SBC_33_LIC_LOADING_IN_SBC) — column names differ from yours!
+# Use this ONLY for YAML structure reference. Use YOUR CIQ's actual column names.
 version: "1.0"
 skipValidationValues: [MANO_EMPTY]
 
@@ -344,9 +485,13 @@ report_output:
             "- Pattern regex values MUST be quoted: pattern: \"^CR[0-9]+$\"\n"
             "- When in doubt, quote the value — extra quotes never break YAML\n\n"
 
-            "CRITICAL:\n"
-            "- Use EXACT sheet names from the CIQ data — do NOT invent or rename sheets (e.g., if sheet is 'Profile Modification', use that exact name, not 'Data')\n"
-            "- Use EXACT column names from the CIQ data — do NOT rename columns\n"
+            "CRITICAL — COLUMN NAMES:\n"
+            "- Use EXACT column names from the CIQ DATA section above — copy-paste them exactly\n"
+            "- DO NOT use column names from the example (Node, NIAM NAME, etc.) — those are from a DIFFERENT UC\n"
+            "- If the CIQ has 'ZONE', use 'ZONE' — NOT 'Node' or 'Zone_Name'\n"
+            "- If the CIQ has 'Node_Name', use 'Node_Name' — NOT 'Node'\n"
+            "- If the CIQ has 'NIAM_NAME1', use 'NIAM_NAME1' — NOT 'NIAM NAME' or 'NIAM_ID'\n"
+            "- Use EXACT sheet names from the CIQ data — do NOT invent or rename sheets\n"
             "- Every column in the CIQ MUST appear in the sheets section\n"
             "- DO NOT add comments like '# Assuming...' — use the actual names from the data\n"
             "- DO NOT generate pattern regex from sample data values — only for known types (IP, email, CRGroup, file paths)\n"
@@ -365,12 +510,29 @@ report_output:
         yaml_content = _extract_yaml(response)
         yaml_content = _fix_yaml_quoting(yaml_content)
 
-        # Validate YAML syntax — if invalid, raise so retry logic can re-generate
+        # Validate YAML syntax — return failed status so retry manager re-generates
         try:
             _validate_yaml(yaml_content)
         except Exception as e:
             logger.warning("Generated validation-rules YAML is invalid: %s", e)
-            raise ValueError(f"Generated YAML has syntax errors: {e}") from e
+            return StepOutput(
+                status="failed",
+                error={"message": f"Generated YAML has syntax errors: {e}"},
+                output_data={"validation_rules_yaml": yaml_content},
+            )
+
+        # Validate column/sheet names against actual CIQ
+        ciq_path = input_data.get("ciq_file_path", "")
+        if ciq_path and Path(ciq_path).exists():
+            mismatches = _validate_against_ciq(yaml_content, ciq_path)
+            if mismatches:
+                error_msg = "Column/sheet name mismatches with CIQ:\n" + "\n".join(mismatches)
+                logger.warning("Validation rules mismatch: %s", error_msg)
+                return StepOutput(
+                    status="failed",
+                    error={"message": error_msg, "mismatches": mismatches},
+                    output_data={"validation_rules_yaml": yaml_content},
+                )
 
         return StepOutput(
             status="passed",
