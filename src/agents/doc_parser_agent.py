@@ -30,7 +30,7 @@ class DocParserAgent:
         from src.core.intermediate_repr import (
             IntermediateRepresentation,
             UCMetadata,
-            CIQData,
+            CIQData, CIQSheetData,
             MopData,
             MopStep,
             ConstraintsData,
@@ -96,6 +96,14 @@ class DocParserAgent:
             ciq_data=CIQData(
                 headers=ciq_result["headers"],
                 rows=ciq_result["rows"],
+                sheet_names=ciq_result.get("sheet_names", []),
+                per_sheet={
+                    name: CIQSheetData(
+                        headers=sdata.get("headers", []),
+                        sample_rows=sdata.get("sample_rows", []),
+                    )
+                    for name, sdata in ciq_result.get("per_sheet", {}).items()
+                },
                 field_types={
                     h: FieldTypeInfo(type=field_types.get(h, "string"))
                     for h in ciq_result["headers"]

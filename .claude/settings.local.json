@@ -11,7 +11,20 @@
       "Bash(test:*)",
       "Bash(do sed:*)",
       "Bash(pip list:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(source:*)",
+      "Bash(netstat:*)",
+      "Bash(taskkill:*)",
+      "WebFetch(domain:localhost)",
+      "Bash(chmod +x:*)",
+      "WebSearch",
+      "Bash(for f in schemas/*.yaml)",
+      "Bash(do echo \"=== $f ===\")",
+      "Read(//d/my_workspace/cr_automation-agentic/**)",
+      "Bash(done)",
+      "Bash(rm:*)",
+      "Bash(find src:*)",
+      "Bash(bash:*)"
     ]
   }
 }

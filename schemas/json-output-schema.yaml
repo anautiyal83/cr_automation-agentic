@@ -1,0 +1,377 @@
+# ===========================================================================
+# JSON Output Schema — Reference for *_json-output.yaml files
+# ===========================================================================
+#
+# A json-output file defines how validated CIQ workbook data is transformed
+# into structured JSON files for use by mop-generator-utility and
+# network-command-executor-utility.
+#
+# File naming convention: {NODE_TYPE}_{ACTIVITY}_json-output.yaml
+#
+# This file is completely independent of the validation-rules YAML.
+# It is passed at runtime as a separate parameter:
+#
+#   ciq-processor:
+#     --json-output-dir  <output-dir>
+#     --json-output-config-file   <NODE_TYPE>_<ACTIVITY>_json-output.yaml
+#
+#   mop-generator-utility:
+#     --json-output-config-file   <NODE_TYPE>_<ACTIVITY>_json-output.yaml
+#
+#   network-command-executor-utility:
+#     --json-output-config-file   <NODE_TYPE>_<ACTIVITY>_json-output.yaml
+#
+# Load it in Java using JsonOutputLoader:
+#   Map<String, Object> template = new JsonOutputLoader().load(".../_json-output.yaml");
+# ===========================================================================
+
+
+# ---------------------------------------------------------------------------
+# Top-level keys
+# ---------------------------------------------------------------------------
+#
+#   output_mode          — controls how many JSON files are produced (required)
+#   segregate_by         — required when output_mode=individual; defines the split key
+#   key_dot_replacement  — optional: replaces dots in column-name keys emitted by _row
+#   data                 — the free-form JSON template tree (required)
+#
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# output_mode
+# ---------------------------------------------------------------------------
+#
+#   single      — one JSON file for the entire workbook.
+#                 File name: <NODE_TYPE>_<ACTIVITY>.json
+#
+#   individual  — one JSON file per distinct value of the segregate_by column.
+#                 File name: <NODE_TYPE>_<ACTIVITY>_<value>.json
+#                 Requires a 'segregate_by' block (see below).
+#
+# ---------------------------------------------------------------------------
+output_mode: individual      # individual (default) | single
+
+
+# ---------------------------------------------------------------------------
+# segregate_by  (required for output_mode: individual)
+# ---------------------------------------------------------------------------
+#
+#   sheet:  <SheetName>   # any sheet in the workbook (use 'Index' for the index sheet)
+#   column: <ColumnName>  # one output file is created per distinct value of this column
+#   as:     $<varname>    # variable injected into the template (default: $unit)
+#
+#   The named sheet is pre-scoped to matching rows for each iteration value.
+#   All other sheets remain fully accessible via WHERE conditions.
+#
+# ---------------------------------------------------------------------------
+segregate_by:
+  sheet:  <SheetName>        # any sheet (use 'Index' for the index sheet)
+  column: <ColumnName>       # one file per distinct value of this column
+  as:     $<varname>         # variable injected into the template (default: $unit)
+
+
+# ---------------------------------------------------------------------------
+# key_dot_replacement  (optional)
+# ---------------------------------------------------------------------------
+#
+# When set, dots in column-name keys emitted by _row directives are replaced
+# with this string.  This prevents flat dotted column names (e.g.
+# "conditions.destRealm.operator") from clashing with the dot-path navigation
+# used by the execution engine.
+#
+# Example:
+#   key_dot_replacement: "__"
+#   → column "conditions.destRealm.operator" becomes key "conditions__destRealm__operator"
+#
+# ---------------------------------------------------------------------------
+key_dot_replacement: "__"
+
+
+# ---------------------------------------------------------------------------
+# data  — JSON template tree
+# ---------------------------------------------------------------------------
+#
+# ── Value resolution rules ────────────────────────────────────────────────
+#
+#   Plain string (no "$", no ".")
+#       Inside a row-iteration block (_each: Sheet or _each: "Sheet WHERE…"):
+#         treated as a column name; the cell value for the current row is used.
+#       Outside a row block:
+#         written as a static string literal.
+#
+#   "SheetName.ColumnName"  (contains ".", no WHERE)
+#       First non-blank value from the (scoped) rows of that sheet + column.
+#       Column names containing spaces must be wrapped in single quotes:
+#         "Node_Details.'NIAM NAME'"
+#
+#   '"Column.With.Dots"'  (double-quoted string in YAML single quotes)
+#       Treated as a literal column name — bypasses Sheet.Column parsing.
+#       Use for columns whose names contain dots (e.g. "Record.BORDER_GATEWAY").
+#       In YAML: '"Record.BORDER_GATEWAY"' (single-quoted YAML wrapping double quotes).
+#
+#   "Sheet.Column WHERE [Sheet.]FilterCol = value"
+#       Relational lookup: scans the sheet's rows and returns the first
+#       non-blank Column value where FilterCol equals the resolved value.
+#       value may be a $variable, Sheet.Col reference, current-row column, or literal.
+#       Multiple conditions are joined with AND:
+#         "Sheet.Col WHERE ColA = $var AND ColB = literal"
+#       Examples:
+#         niamID: "Node_Details.'NIAM NAME' WHERE Node_Details.Node_Name = $node"
+#         email:  "USER_ID.EMAIL WHERE USER_ID.CRGroup = $cr"
+#
+#   $<varname>
+#       Resolves a named variable — from 'segregate_by.as' or from a DISTINCT iteration.
+#
+# ── Array directives (_each) ─────────────────────────────────────────────
+#
+#   _each: "DISTINCT [FROM] <Sheet>.<Column> [WHERE cond] [AS $<varname>]"
+#       RECOMMENDED — fully generic.
+#       Iterates distinct (deduplicated) values of Column from Sheet.
+#       Sets $varname to each value in the child context.
+#       Scopes Sheet's rows to the current value so that Sheet.AnyColumn
+#       lookups automatically return per-value data without extra WHERE clauses.
+#       "FROM" keyword and "AS $varname" are both optional; $item is used when omitted.
+#       Optional WHERE clause filters rows before collecting distinct values.
+#       Examples:
+#         _each: "DISTINCT Index.Node AS $node"
+#         _each: "DISTINCT FROM Index.CRGroup AS $cr"
+#         _each: "DISTINCT Index.Group AS $group"
+#         _each: "DISTINCT Index.Node WHERE Index.CONFIG_SEQ = Step1 AS $node"
+#
+#   _each: <SheetName>
+#       Iterates every row of SheetName.
+#       Inside this block, plain strings resolve as column names in the current row.
+#
+#   _each: "[<Sheet>.<Column> |] <SheetName> WHERE [<Sheet>.]FilterCol = value"
+#       Iterates rows of SheetName where FilterCol equals the resolved value.
+#       An optional "Sheet.Column" prefix before WHERE is supported as a column hint.
+#       value follows the same resolution rules: $variable, Sheet.Col, column name, literal.
+#       Examples:
+#         _each: "ANNOUNCEMENT_FILES WHERE GROUP = Index.GROUP"
+#         _each: "Index.Node WHERE Index.CRGroup = $cr"
+#
+#   _each: "<SheetName> WHERE <Col> IN <Sheet>.<Col>"
+#       Multi-value membership filter: iterates rows of SheetName where
+#       Col's value appears in any of the values collected from Sheet.Col.
+#       Example:
+#         _each: "DATA_TABLE WHERE GROUP IN Index.GROUP"
+#
+# ── _join directive (string joining) ─────────────────────────────────────
+#
+#   field:
+#     _join: "Sheet.Column [WHERE Sheet.FilterCol = value]"
+#     separator: ","     # optional, default ","
+#
+#       Collects all distinct non-blank values of Column (with optional filter),
+#       deduplicates them (first-occurrence order preserved), and joins with separator.
+#       Useful when multiple rows share the same value.
+#
+# ── _ref directive (template self-reference) ─────────────────────────────
+#
+#   field:
+#     _ref: "meta.tableKeys.$table.recordPrimaryKeys"
+#
+#       Reads a literal declared elsewhere in this same template, so static maps
+#       such as meta.tableKeys stay the single source of truth.
+#       The path is split on '.' BEFORE $variables are substituted, so a variable
+#       whose value contains dots (e.g. $table = "System.TrunkGroupTable") resolves
+#       to a single map key. The referenced value is returned verbatim — never
+#       re-evaluated as an expression.
+#
+# ── _col directive (indirect column reference) ───────────────────────────
+#
+#   field:
+#     _col: $pk                                           # name from a variable
+#     _col: {_ref: "meta.tableKeys.$table.primaryKey"}    # name from a _ref lookup
+#     separator: ","                                      # optional, default ","
+#
+#       The operand resolves to a column NAME, which is then read from the current row.
+#       Use when the column to read is itself data-driven.
+#       A comma-separated operand (composite key, e.g. "VN_ID,TG_ID") returns the
+#       matching values joined by the separator.
+#
+# ── _row directive (emit all columns as a map) ───────────────────────────
+#
+#   field:
+#     _row: "*"                                            # all columns, no exclusions
+#     _row: "exclude [GROUP, ACTION, SUBACTION]"           # string form
+#     _row:                                                # map form
+#       exclude: [GROUP, ACTION, SUBACTION]
+#     _row: [GROUP, ACTION, SUBACTION]                     # bare list = exclusion list
+#
+#       Emits all columns of the current row as a key-value map.
+#       Blank cells are omitted. Exclusion matching is case- and underscore-insensitive.
+#       Additional keys declared alongside _row are appended after the row columns,
+#       so computed fields (e.g. primaryKey) can be added to the same object.
+#       When key_dot_replacement is set, dots in column-name keys are replaced.
+#
+# ── _row_join directive (row as a single string) ─────────────────────────
+#
+#   field:
+#     _row_join:
+#       exclude: [NodeGroup, Action]
+#       format: "{col}={val}"       # optional, default "{col}={val}"
+#       separator: " "              # optional, default " "
+#
+#       Serialises the current row to a single string of formatted column/value pairs.
+#       Shares _row's column order, blank-cell skipping and exclusion matching.
+#       format and separator may also be given as siblings of _row_join.
+#
+# ── Nested objects ────────────────────────────────────────────────────────
+#
+#   Any map without an _each/_join/_ref/_col/_row/_row_join key is treated as
+#   a nested object and all its keys are resolved recursively.
+#
+# ---------------------------------------------------------------------------
+data:
+  <jsonKey>: <static value>              # plain string written as-is
+  <jsonKey>: <SheetName>.<ColumnName>    # first non-blank value from sheet+column
+  <jsonKey>: "$<varname>"                # variable from segregate_by or DISTINCT
+  <jsonKey>: "<Sheet>.<Col> WHERE [<Sheet>.]<FilterCol> = $var"   # relational lookup
+  <jsonKey>: '"Column.With.Dots"'        # double-quoted literal column name
+
+  # ── DISTINCT-value array (RECOMMENDED) ────────────────────────────────────
+  <jsonArrayKey>:
+    _each: "DISTINCT <Sheet>.<Column> AS $<varname>"
+    <jsonKey>: $<varname>
+    <jsonKey>: <Sheet>.<Column>          # auto-scoped to current value's rows
+    <jsonKey>: "<Sheet>.<Col> WHERE <Sheet>.<FilterCol> = $<varname>"
+    <nestedArrayKey>:
+      _each: "<DataSheet> WHERE <Col> = <Sheet>.<Col>"
+      <jsonKey>: <ColumnName>
+
+  # ── Row-iteration array ─────────────────────────────────────────────────
+  <jsonArrayKey>:
+    _each: <SheetName>
+    <jsonKey>: <ColumnName>              # column name in the current row
+
+  # ── Filtered row-iteration array ───────────────────────────────────────
+  <jsonArrayKey>:
+    _each: "<SheetName> WHERE [<Sheet>.]<FilterCol> = <value>"
+    <jsonKey>: <ColumnName>
+
+  # ── Multi-value membership filter (IN) ─────────────────────────────────
+  <jsonArrayKey>:
+    _each: "<SheetName> WHERE <Col> IN <Sheet>.<Col>"
+    <jsonKey>: <ColumnName>
+
+  # ── String join ────────────────────────────────────────────────────────
+  <jsonKey>:
+    _join: "<Sheet>.<Column> WHERE <Sheet>.<FilterCol> = $var"
+    separator: ","
+
+  # ── Template self-reference ────────────────────────────────────────────
+  <jsonKey>:
+    _ref: "meta.tableKeys.$table.recordPrimaryKeys"
+
+  # ── Indirect column reference ──────────────────────────────────────────
+  <jsonKey>:
+    _col: {_ref: "meta.tableKeys.$table.primaryKey"}
+    separator: ","
+
+  # ── Emit all row columns as a map ──────────────────────────────────────
+  <jsonKey>:
+    _row: "exclude [GROUP, ACTION]"
+    primaryKey:
+      _col: $pk
+
+  # ── Serialise row to a string ──────────────────────────────────────────
+  <jsonKey>:
+    _row_join:
+      exclude: [NodeGroup, Action]
+      format: "{col}={val}"
+      separator: " "
+
+  # ── Nested object (no _each) ──────────────────────────────────────────
+  <jsonObjectKey>:
+    <jsonKey>: <SheetName>.<ColumnName>
+    <jsonKey>: <static value>
+
+
+# ===========================================================================
+# Examples
+# ===========================================================================
+
+# ── Example 1: node-wise single file ────────────────────────────────────────
+# Produces: MRF_ANNOUNCEMENT_LOADING.json
+#
+# output_mode: single
+# data:
+#   nodeType: MRF
+#   activity: ANNOUNCEMENT_LOADING
+#   nodes:
+#     _each: "DISTINCT Index.Node AS $node"
+#     node:    $node
+#     crGroup: Index.CRGroup
+#     email:   "USER_ID.EMAIL WHERE USER_ID.CRGroup = Index.CRGroup"
+#     niamID:  "Node_Details.'NIAM NAME' WHERE Node_Details.Node_Name = $node"
+#     tableData:
+#       _each: "ANNOUNCEMENT_FILES WHERE GROUP = Index.GROUP"
+#       INPUT_FILE:           INPUT_FILE
+#       MRF_DESTINATION_PATH: MRF_DESTINATION_PATH
+
+# ── Example 2: CR-wise individual files ─────────────────────────────────────
+# Produces: MRF_ANNOUNCEMENT_LOADING_CR001.json, MRF_ANNOUNCEMENT_LOADING_CR002.json …
+#
+# output_mode: individual
+# segregate_by:
+#   sheet:  Index
+#   column: CRGroup
+#   as:     $cr
+# data:
+#   nodeType: MRF
+#   activity: ANNOUNCEMENT_LOADING
+#   crGroup:  $cr
+#   email:    "USER_ID.EMAIL WHERE USER_ID.CRGroup = $cr"
+#   nodes:
+#     _each: "Index.Node WHERE Index.CRGroup = $cr"
+#     node:   Node
+#     niamID: "Node_Details.'NIAM NAME' WHERE Node_Details.Node_Name = Node"
+#     tableData:
+#       _each: "ANNOUNCEMENT_FILES WHERE GROUP = Index.GROUP"
+#       INPUT_FILE:           INPUT_FILE
+#       MRF_DESTINATION_PATH: MRF_DESTINATION_PATH
+
+# ── Example 3: CR-wise single file ──────────────────────────────────────────
+# Produces: MRF_ANNOUNCEMENT_LOADING.json  (all CRs in one file)
+#
+# output_mode: single
+# data:
+#   nodeType: MRF
+#   activity: ANNOUNCEMENT_LOADING
+#   crs:
+#     _each: "DISTINCT FROM Index.CRGroup AS $cr"
+#     crGroup: $cr
+#     email:   "USER_ID.EMAIL WHERE USER_ID.CRGroup = $cr"
+#     nodes:
+#       _each: "Index.Node WHERE Index.CRGroup = $cr"
+#       node:   Node
+#       niamID: "Node_Details.'NIAM NAME' WHERE Node_Details.Node_Name = Node"
+#       tableData:
+#         _each: "ANNOUNCEMENT_FILES WHERE GROUP = Index.GROUP"
+#         INPUT_FILE:           INPUT_FILE
+#         MRF_DESTINATION_PATH: MRF_DESTINATION_PATH
+
+# ── Example 4: _row with _col and _ref (data-driven records) ────────────────
+# Produces per-table records with dynamic primary keys read from a meta map.
+#
+# output_mode: individual
+# segregate_by:
+#   sheet: Index
+#   column: CRGroup
+#   as: $cr
+# key_dot_replacement: "__"
+# data:
+#   meta:
+#     tableKeys:
+#       System.TrunkGroupTable:
+#         recordPrimaryKeys: "VN_ID,TG_ID"
+#   tables:
+#     _each: "DISTINCT Index.TABLES AS $table"
+#     tableName: $table
+#     records:
+#       _each: "$table WHERE NodeGroup = Index.NodeGroup"
+#       _row: "exclude [NodeGroup, Action, SubAction]"
+#       primaryKey:
+#         _col: {_ref: "meta.tableKeys.$table.recordPrimaryKeys"}

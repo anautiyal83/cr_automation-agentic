@@ -29,9 +29,11 @@ CREATE TABLE IF NOT EXISTS uc_document_sets (
     uc_name TEXT NOT NULL,
     ciq_file_path TEXT NOT NULL,
     mop_file_path TEXT NOT NULL,
+    sample_io_xml_paths TEXT,
     constraints_file_path TEXT,
     command_outputs_path TEXT NOT NULL,
     uploaded_at TEXT NOT NULL,
+    additional_documents TEXT,
     validated INTEGER NOT NULL DEFAULT 0,
     validation_errors TEXT,
     selected_sheets TEXT

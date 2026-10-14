@@ -1,14 +1,14 @@
 openrouter_api_key: "${OPENROUTER_API_KEY}"
 
 models:
-  default: "openrouter/anthropic/claude-sonnet-4-20250514"
+  default: "openrouter/google/gemini-2.5-flash"
   per_step:
-    1: null
-    2: null
-    3: null
-    4: null
-    5: null
-    6: null
+    1: null  # Doc Parser — uses default (Gemini 2.5 Flash)
+    2: null  # UC Analyzer — uses default
+    3: null  # Validation Rules Gen — uses default
+    4: null  # JSON Template Gen — uses default
+    5: null  # Workflow Gen — uses default
+    6: null  # Script + Simulator Gen — uses default
 
 retry:
   test_failure_limit: 3

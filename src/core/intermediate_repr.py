@@ -36,9 +36,16 @@ class UCMetadata(BaseModel):
     # keys: ciq_file, mop_file, constraints_file, command_outputs_file
 
 
+class CIQSheetData(BaseModel):
+    headers: list[str] = Field(default_factory=list)
+    sample_rows: list[dict[str, str]] = Field(default_factory=list)
+
+
 class CIQData(BaseModel):
     headers: list[str] = Field(default_factory=list)
     rows: list[dict[str, str]] = Field(default_factory=list)
+    sheet_names: list[str] = Field(default_factory=list)
+    per_sheet: dict[str, CIQSheetData] = Field(default_factory=dict)
     field_types: dict[str, FieldTypeInfo] = Field(default_factory=dict)
 
 

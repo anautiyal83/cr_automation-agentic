@@ -1,6 +1,8 @@
 # Per-step LLM model assignments
-# Steps 1-6 use LLM agents; null means use default model
-# Steps 7-9 are deterministic (no LLM) — entries here are informational only
+# Steps 1-4, 6-7 use LLM agents; null means use default model
+# Steps 5, 8-9 are deterministic (no LLM)
+
+default_model: "openrouter/google/gemini-2.5-flash"
 
 steps:
   1:
@@ -16,26 +18,26 @@ steps:
     model: null
     uses_llm: true
   4:
-    name: "JSON Template Generator"
+    name: "JSON Output Generator"
     model: null
     uses_llm: true
   5:
+    name: "CIQ Validation Tester"
+    model: null
+    uses_llm: false
+  6:
     name: "Workflow Generator"
     model: null
     uses_llm: true
-  6:
-    name: "Script + Simulator Config Generator"
+  7:
+    name: "Simulator Config Generator"
     model: null
     uses_llm: true
-  7:
-    name: "Schema Validator"
-    model: null
-    uses_llm: false
   8:
-    name: "Test Executor"
+    name: "Execution Tester"
     model: null
     uses_llm: false
   9:
-    name: "Report Generator"
+    name: "Final Report Generator"
     model: null
     uses_llm: false

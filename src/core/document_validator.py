@@ -14,9 +14,6 @@ from src.parsers.mop_parser import parse_mop
 from src.parsers.command_output_parser import parse_command_outputs
 
 
-DEFAULT_MANDATORY_COLUMNS = ["Hostname", "IP_Address"]
-
-
 async def validate_documents(
     uc_name: str,
     ciq_path: str,
@@ -25,11 +22,13 @@ async def validate_documents(
     command_outputs_path: str,
     mandatory_columns: list[str] | None = None,
 ) -> ValidationResult:
-    """Validate uploaded documents for format correctness and minimum content."""
-    errors: list[ValidationError] = []
-    mandatory = mandatory_columns or DEFAULT_MANDATORY_COLUMNS
+    """Validate uploaded documents — checks file existence, format, and basic parseability.
 
-    # Validate CIQ Excel
+    Column-level and content-level analysis is deferred to the LLM agents (steps 1-2).
+    """
+    errors: list[ValidationError] = []
+
+    # Validate CIQ Excel — format only
     if not Path(ciq_path).exists():
         errors.append(ValidationError(
             document="ciq", error_type="missing_file",
@@ -43,25 +42,20 @@ async def validate_documents(
                 message=f"CIQ must be .xlsx or .xls, got {suffix}",
             ))
         else:
-            result = parse_ciq(ciq_path, mandatory_columns=mandatory)
-            for err in result["errors"]:
-                if "Missing mandatory" in err:
+            try:
+                result = parse_ciq(ciq_path, mandatory_columns=[])
+                if not result["rows"] and not result["headers"]:
                     errors.append(ValidationError(
-                        document="ciq", error_type="missing_column",
-                        message=err,
+                        document="ciq", error_type="empty_content",
+                        message="CIQ file contains no readable data",
                     ))
-                else:
-                    errors.append(ValidationError(
-                        document="ciq", error_type="parse_error",
-                        message=err,
-                    ))
-            if not result["rows"]:
+            except Exception as exc:
                 errors.append(ValidationError(
-                    document="ciq", error_type="empty_content",
-                    message="CIQ file contains no data rows",
+                    document="ciq", error_type="parse_error",
+                    message=f"Failed to parse CIQ: {exc}",
                 ))
 
-    # Validate MOP
+    # Validate MOP — format only
     if not Path(mop_path).exists():
         errors.append(ValidationError(
             document="mop", error_type="missing_file",
@@ -74,21 +68,8 @@ async def validate_documents(
                 document="mop", error_type="invalid_format",
                 message=f"MOP must be .docx, .pdf, or .txt, got {suffix}",
             ))
-        else:
-            result = parse_mop(mop_path)
-            if result["errors"]:
-                for err in result["errors"]:
-                    errors.append(ValidationError(
-                        document="mop", error_type="parse_error",
-                        message=err,
-                    ))
-            if not result["steps"]:
-                errors.append(ValidationError(
-                    document="mop", error_type="empty_content",
-                    message="MOP contains no extractable command steps",
-                ))
 
-    # Validate constraints (optional)
+    # Validate constraints (optional) — format only
     if constraints_path and Path(constraints_path).exists():
         suffix = Path(constraints_path).suffix.lower()
         if suffix not in (".txt", ".yaml", ".yml", ".json", ".csv"):
@@ -97,19 +78,11 @@ async def validate_documents(
                 message=f"Constraints file format not supported: {suffix}",
             ))
 
-    # Validate command outputs
+    # Validate command outputs — existence only
     if not Path(command_outputs_path).exists():
         errors.append(ValidationError(
             document="command_outputs", error_type="missing_file",
             message="Command outputs file not found",
         ))
-    else:
-        result = parse_command_outputs(command_outputs_path)
-        if result["errors"]:
-            for err in result["errors"]:
-                errors.append(ValidationError(
-                    document="command_outputs", error_type="parse_error",
-                    message=err,
-                ))
 
     return ValidationResult(valid=len(errors) == 0, errors=errors)

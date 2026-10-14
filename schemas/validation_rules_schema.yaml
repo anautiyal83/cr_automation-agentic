@@ -1,0 +1,597 @@
+version: "1.0"
+
+# ---------------------------------------------------------------------------
+# Global settings
+# ---------------------------------------------------------------------------
+settings:
+  headerRow: 0              # 0-based row index of the header row
+  dataStartRow: 1           # 0-based row index where data rows begin
+  trimCellValues: true      # strip leading/trailing whitespace from each cell
+                            # set false to preserve exact cell formatting (e.g. trailing spaces)
+  ignoreBlankRows: true     # skip rows where every cell is blank
+  caseSensitiveHeaders: false
+  caseSensitiveValues: true
+
+
+# ---------------------------------------------------------------------------
+# Global flags
+# ---------------------------------------------------------------------------
+
+# When true, validates that Index sheet entries reference existing data sheets.
+validateIndexSheets: false
+
+# When true, validates that Node column values exist in the Node_ID sheet.
+validateNodeIds: false
+
+# Global sentinel values that suppress validation for a single cell.
+# When a column is declared required: false and its cell value equals one of these
+# tokens (trimmed, case-insensitive), the entire cell-validator chain is skipped:
+# type, pattern, allowedValues, min/max, allowedRanges, crossRef, allowedValuesWhen,
+# custom validators, unique/uniqueWhen, minOnePerGroup, row rules, and unique_key.
+# Columns declared required: true are never bypassed.
+# Omitted or empty (the default) disables the feature entirely.
+skipValidationValues: [MANO_EMPTY]
+
+
+# ---------------------------------------------------------------------------
+# Node-ID configuration
+# ---------------------------------------------------------------------------
+# Identifies the Node-ID sheet and its key columns for NIAM mapping.
+# When absent the reader defaults to sheet Node_ID, columns Node and NIAM_ID.
+node_id_config:
+  sheet:       Node_Details     # default: Node_ID
+  nodeColumn:  Node_Name        # default: Node
+  niamColumn:  "NIAM NAME"      # default: NIAM_ID
+
+
+# ---------------------------------------------------------------------------
+# Cross-sheet (workbook-level) rules
+# ---------------------------------------------------------------------------
+workbook_rules:
+
+  # every value in source must exist in target (subset)
+  - subset:
+      from: <SheetName>.<ColumnName>
+      to:   <SheetName>.<ColumnName>
+      where: "<ColumnName> = <value>"     # optional: row filter on the 'from' sheet
+
+  # source must contain all values from target (superset)
+  - superset:
+      from: <SheetName>.<ColumnName>
+      to:   <SheetName>.<ColumnName>
+      where: "<ColumnName> = <value>"     # optional: row filter on the 'from' sheet
+
+  # values must not appear in both columns simultaneously
+  - unique:
+      columns: [<SheetName>.<ColumnName>, <SheetName>.<ColumnName>]
+
+  # every row in source must match a row in target
+  - match:
+      from: <SheetName>.<ColumnName>
+      to:   <SheetName>.<ColumnName>
+      where: "<ColumnName> = <value>"     # optional: row filter on the 'from' sheet
+
+  # each value in source must appear in at least one of the target columns (OR-subset)
+  - subset_any:
+      from: <SheetName>.<ColumnName>
+      to:
+        - <SheetName>.<ColumnName>
+        - <SheetName>.<ColumnName>
+
+  # each distinct value of the partition column must appear exactly N times
+  - count_per:
+      sheet: <SheetName>
+      group: <ColumnName>               # column whose distinct values define the partitions
+      count: 2                          # exact number of rows expected per group
+
+  # listed columns must hold a constant value within each partition
+  - constant_within:
+      sheet:   <SheetName>
+      group:   <ColumnName>             # column whose distinct values define the partitions
+      columns: [<ColumnName>, ...]      # columns that must be constant within each group
+
+  # each source group's value set must match exactly one target row's column set
+  - set_match:
+      source:
+        sheet:  <SheetName>
+        group:  <ColumnName>            # column defining the groups
+        column: <ColumnName>            # column whose values are collected per group
+      target:
+        sheet:   <SheetName>
+        columns: [<ColumnName>, ...]    # columns whose combined values form the target set
+
+  # a column's values must form contiguous blocks within each partition
+  - contiguous_sequence:
+      sheet: <SheetName>
+      partitionBy: [<ColumnName>, ...]  # composite partition key
+      column: <ColumnName>              # column whose values must be contiguous per partition
+
+  # partition-scoped subset: values per source partition must appear in the target partition
+  - set:
+      from:
+        sheet: <SheetName>
+        column: <ColumnName>
+        partitionBy: [<ColumnName>, ...]
+        where: "<ColumnName> = <value>"   # optional: row filter on the source partition
+      to:
+        sheet: <SheetName>
+        column: <ColumnName>
+        partitionBy: [<ColumnName>, ...]  # must be a subset of from.partitionBy (by name)
+      bidirectional: false                # true = per-partition set equality (both directions)
+
+  # Streamlined cross-sheet comparison (preferred over cross_sheet_compare).
+  # Compare columns across two or more sheets for rows sharing the same key.
+  - cross_check:
+      on: [<ColumnName>, ...]              # composite key columns used to join rows
+      columns:                             # [sheet, column] pairs to compare (2+ required)
+        - [<SheetName>, <ColumnName>]
+        - [<SheetName>, <ColumnName>]
+      relation: not_both                   # equals | not_equals | opposite | not_both (default)
+      values:                              # active values for not_both (defaults to [ENABLE])
+        - <value>
+      pairs:                               # required for relation: opposite
+        - [<value>, <value>]
+      from: <SheetName>                    # optional: driver sheet scoping which keys to check
+      filter: "<ColumnName> = <value>"     # optional: row filter on the driver sheet
+      missing: skip                        # skip (default) | error
+      message: "..."                       # optional: {KeyCol} and {SheetName} are substituted
+
+  # Legacy cross-sheet comparison (cross_check is preferred for new rules).
+  # Join two sheets on a composite key, then compare one column on each side.
+  - cross_sheet_compare:
+      driver:                            # optional: restricts the keys checked
+        sheet:  <SheetName>              #   usually Index
+        keys:   [<ColumnName>, ...]      #   canonical key names, also used in {placeholders}
+        where:  "<ColumnName> = <value>" #   optional single-equality row filter
+      left:
+        sheet:  <SheetName>
+        column: <ColumnName>
+        keys:   [<ColumnName>, ...]      # optional: only when this sheet names the
+                                         # key columns differently; must align with driver.keys
+      right:
+        sheet:  <SheetName>
+        column: <ColumnName>
+      relation: not_both                 # equals | not_equals | opposite (default) | not_both
+      active_values:                     # required for relation: not_both
+        - <value>                        #   fails only when BOTH sides hold an active value;
+                                         #   all-inactive and one-of-each pass
+      value_pairs:                       # required for relation: opposite (strict: the two
+        - [<value>, <value>]             #   values must differ and share one pair, so
+                                         #   DISABLE/DISABLE would fail)
+      on_missing: skip                   # skip (default) | error - key present on one side only
+      message: "..."                     # optional; {KeyColumn}, {left}, {right} are substituted
+
+
+# ---------------------------------------------------------------------------
+# Custom validator registry
+# ---------------------------------------------------------------------------
+validators:
+  <validatorName>:
+    class: "<fully.qualified.ClassName>"
+    description: "<description>"
+
+# ---------------------------------------------------------------------------
+# Sheet definitions
+# ---------------------------------------------------------------------------
+sheets:
+
+  <SheetName>:
+    required: true
+    required_if_listed_in: <SheetName>.<ColumnName>  # dynamic presence: sheet is required only if
+                                                     # its name appears in the specified column of
+                                                     # another sheet. Evaluated when required: false.
+                                                     # Example: required_if_listed_in: Index.TABLES
+    aliases: []               # alternative sheet names accepted during validation
+    settings:
+      headerRow: 0            # override any global setting for this sheet only
+      dataStartRow: 1
+      trimCellValues: true    # override global trimming for this sheet
+      ignoreBlankRows: false  # include blank rows in the middle of data
+      caseSensitiveHeaders: false
+      caseSensitiveValues: true
+
+    columns:
+
+      # ── string column ────────────────────────────────────────────────────
+      <ColumnName>:
+        required: true
+        type: string                           # default when 'type' is omitted
+        aliases: []                            # alternative column header names accepted
+        unique: false                          # values must be distinct within the sheet
+        uniqueWhen:                            # conditional uniqueness: unique only across
+          column: <ColumnName>                 # rows matching this condition
+          operator: equals                     # same operators as row-rule 'when'
+          value: <value>
+        ignoreCase: false                      # case-insensitive match for allowedValues / values
+        description: "<column description>"   # informational; shown in Column_Guide export sheet
+        minLength: 1
+        maxLength: 100
+        pattern: "<regex>"                     # full-match regex (java.util.regex syntax)
+        patternMessage: "<human-readable description>"  # prefix prepended to pattern error message
+        allowedValues: [<value>, <value>]      # allowed-values constraint (case-insensitive)
+        dropdownDisabled: false                # true = suppress Excel dropdown for this column even when
+                                               # allowedValues/values is set (use when list > 255 chars)
+                                               # validation is NOT affected — only the UI dropdown is omitted
+        allowedValuesWhen:                     # conditional allowed/forbidden values (all entries evaluated)
+          - column: <TriggerColumn>            # trigger column in the same row
+            operator: equals                   # equals(default)|notEquals|contains|blank|notBlank
+                                               # greaterThan|greaterThanOrEquals|lessThan|lessThanOrEquals
+                                               # symbol aliases: ==|!=|>|>=|<|<=  — omit for backward-compat default
+            value: <triggerValue>             # trigger value; not used for blank/notBlank
+            allowedValues: []                  # empty list = must be blank; non-empty = must match one of these
+          - column: <TriggerColumn>
+            operator: notEquals                # example: if ColumnA != X then this column must be Y
+            value: <triggerValue>
+            allowedValues: [<value>, <value>]
+          - when: "COL_A == 'X' && COL_B == 'Y'"   # compound trigger expression (alternative to
+            allowedValues: ["Z"]                     # column/operator/value). Supports && / || and
+                                                     # comparisons ==, !=, >, >=, <, <= with string
+                                                     # literals in single or double quotes.
+        crossRef:                              # value must exist in the target sheet+column
+          sheet: <SheetName>                   # target sheet; use "_index" for INDEX node list
+          column: <ColumnName>                 # column whose values form the valid set
+        validator: <validatorName>             # custom validator from the validators: registry
+        minOnePerGroup:                        # at least one non-blank value required per group
+          groupByColumn: <ColumnName>          # column whose distinct values define the groups
+        consolidate: false                     # for Index-sheet columns only: accumulate values
+                                               # across all rows sharing the same CRGroup key;
+                                               # comma/semicolon-separated tokens within a cell
+                                               # are split, deduplicated, and joined back
+        consolidate_separator: ";"             # separator for consolidated tokens (default: ";")
+        conditionalPattern:                    # cross-sheet conditional pattern validation
+          startColumn: <ColumnName>            # column in current row to seed the join chain
+          lookupChain:                         # ordered list of join steps
+            - sheet: <SheetName>
+              joinOn: <ColumnName>             # match incoming value against this column
+              extract: <ColumnName>            # carry this column's value to next step
+          rules:                               # first matching 'when' wins; null/empty = catch-all
+            - when: "<regex>"                  # full-match regex against the resolved lookup value
+              pattern: "<regex>"               # regex the cell value must satisfy
+              message: "<error message>"       # {value} and {lookupValue} placeholders supported
+        messages:
+          required:  "<custom message>"        # default: "Column '<name>' is required but is empty"
+          minLength: "<custom message>"        # default: "Value '<v>' is too short (length N); minimum is M"
+          maxLength: "<custom message>"        # default: "Value '<v>' is too long (length N); maximum is M"
+          pattern:   "<custom message>"        # default: "Value '<v>' does not match pattern: <regex>"
+          type:      "<custom message>"        # default: "Value '<v>' not in allowed values: [...]"
+
+      # ── enum column ────────────────────────────────────────────────────
+      <ColumnName>:
+        required: true
+        type: enum
+        values: [<value>, <value>]             # closed vocabulary (case-insensitive)
+
+      # ── integer column ───────────────────────────────────────────────────
+      <ColumnName>:
+        required: true
+        type: integer
+        minValue: 1                            # inclusive lower bound
+        maxValue: 100                          # inclusive upper bound
+        allowedRanges:                         # value must fall within at least one band (OR logic)
+          - { min: <min>, max: <max> }
+          - { min: <min>, max: <max> }
+        pattern: "<regex>"                     # custom regex applied after integer parse succeeds
+        patternMessage: "<description>"        # prefix for pattern mismatch message
+        messages:
+          required: "<custom message>"         # default: "Column '<name>' is required but is empty"
+          min:      "<custom message>"         # default: "Value N is below minimum M"
+          max:      "<custom message>"         # default: "Value N exceeds maximum M"
+          type:     "<custom message>"         # default: "Value '<v>' is not a valid integer"
+                                               #          or "Value N is not within any allowed range: [...]"
+
+      # ── decimal column ───────────────────────────────────────────────────
+      <ColumnName>:
+        required: true
+        type: decimal
+        minDecimal: 0.00
+        maxDecimal: 9999.99
+        precision: 2                           # maximum number of decimal places allowed
+        messages:
+          required:  "<custom message>"        # default: "Column '<name>' is required but is empty"
+          min:       "<custom message>"        # default: "Value N is below minimum M"
+          max:       "<custom message>"        # default: "Value N exceeds maximum M"
+          precision: "<custom message>"        # default: "Value '<v>' has N decimal place(s) but maximum allowed is P"
+          type:      "<custom message>"        # default: "Value '<v>' is not a valid decimal number"
+
+      # ── boolean column ──────────────────────────────────────────────────
+      <ColumnName>:
+        required: true
+        type: boolean
+        accept: "true/false"                   # accepted representations (case-insensitive):
+                                               # "true/false" (default) | "yes/no" | "1/0"
+
+      # ── date column ────────────────────────────────────────────────────
+      <ColumnName>:
+        required: false
+        type: date
+        format: "yyyy-MM-dd"                   # SimpleDateFormat pattern (default: yyyy-MM-dd)
+
+      # ── time column ────────────────────────────────────────────────────
+      <ColumnName>:
+        required: false
+        type: time
+        format: "HH:mm:ss"                     # SimpleDateFormat pattern (default: HH:mm:ss)
+
+      # ── datetime column ──────────────────────────────────────────────────
+      <ColumnName>:
+        required: false
+        type: datetime
+        format: "yyyy-MM-dd'T'HH:mm:ss"        # default: yyyy-MM-dd'T'HH:mm:ss  (SimpleDateFormat pattern)
+        messages:
+          required: "<custom message>"         # default: "Column '<name>' is required but is empty"
+          format:   "<custom message>"         # default: "Value '<v>' is not a valid datetime; expected format: yyyy-MM-dd'T'HH:mm:ss"
+
+      # ── email column ─────────────────────────────────────────────────────
+      <ColumnName>:
+        required: true
+        type: email
+        multi: false                           # true = comma-separated list of addresses accepted
+        pattern: "<regex>"                     # custom regex override for the email format check
+        patternMessage: "<description>"        # prefix prepended to pattern mismatch message
+        messages:
+          required: "<custom message>"         # default: "Column '<name>' is required but is empty"
+          type:     "<custom message>"         # default: "'<email>' is not a valid email address"
+
+      # ── phone column ─────────────────────────────────────────────────────
+      <ColumnName>:
+        required: false
+        type: phone                            # phone number in E.164 format
+        pattern: "<regex>"                     # custom regex override
+
+      # ── ip column ────────────────────────────────────────────────────────
+      <ColumnName>:
+        required: false
+        type: ip
+        accepts: ipv4                          # ipv4 (default) | ipv6 | both
+        messages:
+          required: "<custom message>"         # default: "Column '<name>' is required but is empty"
+          type:     "<custom message>"         # default: "Value '<v>' is not a valid IPv4 address"
+                                               #          (or IPv6 / IPv4 or IPv6 depending on accepts)
+
+      # ── mac column ───────────────────────────────────────────────────────
+      <ColumnName>:
+        required: false
+        type: mac                              # MAC address format
+        pattern: "<regex>"                     # custom regex override
+
+      # ── cidr column ──────────────────────────────────────────────────────
+      <ColumnName>:
+        required: false
+        type: cidr                             # CIDR notation (e.g. 192.168.1.0/24)
+        pattern: "<regex>"                     # custom regex override
+
+      # ── hostname column ──────────────────────────────────────────────────
+      <ColumnName>:
+        required: false
+        type: hostname                         # RFC 1123 hostname format
+        pattern: "<regex>"                     # custom regex override
+
+      # ── fqdn column ──────────────────────────────────────────────────────
+      <ColumnName>:
+        required: false
+        type: fqdn                             # fully qualified domain name
+        pattern: "<regex>"                     # custom regex override
+
+      # ── protocol column ──────────────────────────────────────────────────
+      <ColumnName>:
+        required: false
+        type: protocol                         # network protocol from allowed list
+        values: [TCP, UDP, SCTP]               # allowed protocol values
+
+      # ── urlScheme column ──────────────────────────────────────────────────
+      <ColumnName>:
+        required: false
+        type: urlScheme                        # URL with allowed scheme
+        values: [http, https, sip, sips]       # allowed URL schemes
+
+      # ── sheetRef column ──────────────────────────────────────────────────
+      # Value must match an existing sheet name in the workbook.
+      # Useful for Index sheets where a column lists table/sheet names.
+      <ColumnName>:
+        required: true
+        sheetRef: true
+        sheetRefIgnoreCase: false              # true = "announcement_files" matches "ANNOUNCEMENT_FILES"
+        multi: false                           # true = comma-separated list of sheet names accepted
+        messages:
+          required: "<custom message>"         # default: "Column '<name>' is required but is empty"
+          type:     "<custom message>"         # default: "Sheet '<v>' does not exist in the workbook (case-sensitive); available sheets: [...]"
+
+      # ── custom validator column ──────────────────────────────────────────
+      <ColumnName>:
+        required: false
+        type: custom
+        validator: <validatorName>             # must be declared under validators: at root level
+
+
+    # -------------------------------------------------------------------------
+    # Row rules — applied to every data row in the sheet
+    # -------------------------------------------------------------------------
+    #
+    # Column reference convention (applies to ALL rule types):
+    #   ColumnName              → column in the current sheet (default)
+    #   SheetName.ColumnName    → column in the named sheet
+    #
+    # This notation is valid everywhere a column name appears:
+    # require, forbid, when.column, compare, one_of, only_one, all_or_none,
+    # sum, equals, unique_key, pooled_unique.
+    # -------------------------------------------------------------------------
+    rules:
+
+      # require — with when condition
+      - require: <ColumnName>
+        when:
+          column: <ColumnName>                   # same sheet
+          operator: equals                       # equals | notEquals | blank | notBlank | contains
+          value: <value>                         # (not used for blank / notBlank)
+
+      - require: <SheetName>.<ColumnName>
+        when:
+          column: <SheetName>.<ColumnName>       # cross-sheet column in when condition
+          operator: notBlank
+
+      # forbid — with when condition
+      - forbid: <ColumnName>
+        when:
+          column: <ColumnName>
+          operator: notBlank
+
+      - forbid: <SheetName>.<ColumnName>
+        when:
+          column: <ColumnName>
+          operator: notBlank
+
+      # require with a numeric comparison condition
+      - require: <ColumnName>
+        when:
+          column: <SheetName>.<ColumnName>       # SheetName optional; defaults to current sheet
+          operator: greaterThan                  # greaterThan | greaterThanOrEquals | lessThan | lessThanOrEquals
+          value: <value>
+
+      # require with compound condition (AND / OR nesting)
+      - require: <ColumnName>
+        when:
+          all:
+            - column: <ColumnName>
+              operator: equals
+              value: <value>
+            - any:
+                - column: <SheetName>.<ColumnName>
+                  operator: greaterThan
+                  value: <value>
+                - column: <ColumnName>
+                  operator: blank
+
+      # cross-sheet existence check in when (sheet: field)
+      - require: <ColumnName>
+        when:
+          sheet: <SheetName>                     # look up current row's <column> value in this sheet
+          column: <ColumnName>
+          operator: exists                       # exists | notExists
+
+      # cross-column comparison — SheetName optional on both sides
+      # Supported operators: equals, notEquals, greaterThan, greaterThanOrEquals, lessThan, lessThanOrEquals
+      # Symbol aliases: ==, !=, >, >=, <, <=
+      - compare: "<ColumnA> lessThanOrEquals <ColumnB>"
+      - compare: "<SheetA>.<ColumnA> greaterThan <SheetB>.<ColumnB>"
+
+      # group presence — SheetName optional in any element
+      - one_of:    [<ColumnA>, <SheetName>.<ColumnB>]
+      - only_one:  [<ColumnA>, <ColumnB>]
+      - all_or_none: [<ColumnA>, <SheetName>.<ColumnB>, <ColumnC>]
+
+      # composite uniqueness — combined value of listed columns must be unique per row
+      - unique_key: [<ColumnA>, <ColumnB>]
+
+      # pooled uniqueness — every non-blank value across ALL listed columns (pooled
+      # into one set, not per-column) must be globally unique. A value used in one
+      # column cannot reappear in that column or any other listed column, in the
+      # same row or any other row.
+      - pooled_unique: [<ColumnA>, <ColumnB>]
+
+      # sum — SheetName optional in any element
+      - sum: [<ColumnA>, <SheetName>.<ColumnB>]
+        equals: <ColumnC>
+
+
+# ---------------------------------------------------------------------------
+# Validation report output
+# ---------------------------------------------------------------------------
+# Controls the names and formats of the validation report files written to
+# --output.  All fields are optional; defaults are shown below.
+#
+# Fields:
+#   formats        — list of formats to generate.
+#                    Accepted values (case-insensitive): JSON, HTML, MSEXCEL.
+#                    Default: all three.
+#
+#   filename       — base name of the report files, without extension.
+#                    Supports {nodeType} and {activity} placeholders (replaced
+#                    with upper-case values at runtime).
+#                    Default: {nodeType}_{activity}_VALIDATION_REPORT
+#
+# Note: The HTML report template is NOT configured here.
+#       It is passed at runtime via CLI parameters:
+#         --report-template-name  <filename>   (e.g. validation-report-template.html)
+#         --report-template-path  <directory>  (e.g. src/main/resources)
+#       When omitted, the built-in HtmlReportWriter is used.
+#       When both are provided, HtmlTemplateReportWriter renders the template.
+# ---------------------------------------------------------------------------
+report_output:
+  formats: [JSON, HTML, MSEXCEL]
+  filename: "{nodeType}_{activity}_VALIDATION_REPORT"
+
+
+# ---------------------------------------------------------------------------
+# Post-validation outputs
+# ---------------------------------------------------------------------------
+# Computed only when validation PASSES.
+# Each entry is added to ValidationReport.parameters and printed to stdout
+# as KEY=VALUE.  The YAML map key is used as the parameter name unless the
+# optional 'name' field overrides it.
+#
+# Supported aggregates:
+#   distinct  — deduplicated non-blank values from 'column' joined by 'separator' (default ",")
+#   count     — number of non-blank rows for 'column'; total row count when 'column' is omitted
+#   sum       — numeric sum of 'column' values (non-numeric cells silently ignored)
+#   group     — groups distinct 'column' values by each distinct 'groupBy' value;
+#               emits one parameter per group: <PARAM_NAME>_<groupValue> = joined column values.
+#               Requires both 'column' and 'groupBy'.
+#               Example: NODES_BY_CR_CR001=MRF1,MRF2  NODES_BY_CR_CR002=MRF3
+# ---------------------------------------------------------------------------
+outputs:
+
+  # Distinct values from a column (comma-separated)
+  <PARAM_NAME>:
+    sheet: <SheetName>
+    column: <ColumnName>
+    aggregate: distinct
+    separator: ","              # optional — defaults to ","
+
+  # Count of non-blank values in a column
+  <PARAM_NAME>:
+    sheet: <SheetName>
+    column: <ColumnName>
+    aggregate: count
+
+  # Total row count for a sheet (column omitted)
+  <PARAM_NAME>:
+    sheet: <SheetName>
+    aggregate: count
+
+  # Numeric sum of a column
+  <PARAM_NAME>:
+    sheet: <SheetName>
+    column: <ColumnName>
+    aggregate: sum
+
+  # Group: one parameter per distinct groupBy value
+  # Emits <PARAM_NAME>_<groupValue> = joined column values
+  <PARAM_NAME>:
+    sheet: <SheetName>
+    groupBy: <GroupByColumnName>
+    column: <ColumnName>
+    aggregate: group
+    separator: ","              # optional — defaults to ","
+
+  # Override the parameter name stored in the report
+  <yaml_key>:
+    name: <PARAM_NAME>          # emitted as PARAM_NAME instead of yaml_key
+    sheet: <SheetName>
+    column: <ColumnName>
+    aggregate: distinct
+
+
+# ---------------------------------------------------------------------------
+# JSON output
+# ---------------------------------------------------------------------------
+# The JSON output configuration is a separate file, independent of the
+# validation rules.  It is passed at runtime via:
+#
+#   --json-output-config-file  <NODE_TYPE>_<ACTIVITY>_json-output.yaml
+#
+# The same file is loaded independently by mop-generator and
+# command-executor, so that the output template is shared
+# across validation, MOP generation, and execution without duplication.
+#
+# See JsonOutputSchema.yaml for the full reference and examples.
+# ---------------------------------------------------------------------------

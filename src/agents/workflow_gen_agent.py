@@ -20,7 +20,7 @@ def _extract_yaml(text: str) -> str:
 
 
 class WorkflowGenAgent:
-    step_number = 5
+    step_number = 6
     step_name = "Workflow Generator"
 
     async def execute(
@@ -30,9 +30,9 @@ class WorkflowGenAgent:
         few_shot_examples: list[dict] | None = None,
         retry_context: RetryContext | None = None,
     ) -> StepOutput:
-        model = get_model_for_step(5, config)
+        model = get_model_for_step(6, config)
 
-        schema_path = Path("schemas/workflow.schema.yaml")
+        schema_path = Path("schemas/cli-automation-workflow-schema_v1.2.yaml")
         schema = schema_path.read_text(encoding="utf-8") if schema_path.exists() else ""
 
         prompt_path = Path("src/prompts/workflow_gen.yaml")
@@ -61,15 +61,25 @@ class WorkflowGenAgent:
                 "Fix the issues and regenerate."
             )
 
+        uc_name = input_data.get("uc_name", "UC")
         prompt = (
-            f"Generate a workflow.yaml for this UC:\n\n{ir_summary}\n\n"
-            f"Schema reference:\n{schema}\n\n"
+            f"Generate a CLI automation workflow YAML for UC: {uc_name}\n\n"
+            f"Input documents data (MOP steps and command outputs):\n{ir_summary}\n\n"
+            f"cr-automation workflow schema reference (v1.2):\n{schema[:12000]}\n\n"
             f"{few_shot_text}{retry_info}\n\n"
-            "Return ONLY valid YAML content."
+            "IMPORTANT: Generate a COMPLETE workflow YAML that follows the cr-automation CLI automation schema v1.2.\n"
+            "Include: version, name, globals (vars with ${var} placeholders for CIQ data, secrets, defaults), "
+            "nodes (SSH remote connections with host/user/auth from CIQ variables), "
+            "and phases with steps (send commands from MOP, register output variables, "
+            "add validation blocks with success/failure criteria).\n"
+            "Use ${varName} syntax for variable interpolation.\n"
+            "Map MOP commands to workflow steps, use command outputs for validation patterns.\n"
+            "Return ONLY valid YAML content, no markdown fences."
         )
         system = (
-            "You are a YAML config generator for the cr-automation framework. "
-            "Generate workflow.yaml conforming exactly to the schema."
+            "You are a telecom UC config generator for the cr-automation CLI automation framework. "
+            "Generate workflow YAML v1.2 with globals, nodes (SSH/REST), phases, steps with "
+            "send commands, register variables, validation, and expect_reply blocks."
         )
 
         response = await call_llm(prompt, system_prompt=system, model=model)

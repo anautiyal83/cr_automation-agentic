@@ -31,13 +31,29 @@ class PipelineOrchestrator:
     """Central controller that manages pipeline execution per contracts/pipeline-api.md."""
 
     def __init__(self, db: Database, artifact_store: ArtifactStore,
-                 config: PipelineConfiguration | dict | None = None) -> None:
+                 config: PipelineConfiguration | dict | None = None,
+                 config_manager: Any | None = None) -> None:
         self.db = db
         self.artifact_store = artifact_store
         self.config = config or {}
+        self.config_manager = config_manager  # live config source
         self._active_tasks: dict[UUID, asyncio.Task] = {}
+        self._milestone_events: dict[UUID, asyncio.Event] = {}
+        self._milestone_decisions: dict[UUID, str] = {}  # "continue", "rerun", "cancel"
 
-    async def start_run(self, document_set: UCDocumentSet) -> PipelineRun:
+    # Milestone steps — pause after each for user review
+    MILESTONE_STEPS = {3, 4, 5, 6, 7, 8}
+    MILESTONE_NAMES = {
+        3: "Validation Rules",
+        4: "JSON Output Template",
+        5: "CIQ Validation Test Results",
+        6: "Workflow",
+        7: "Simulator Config",
+        8: "Execution Test Results",
+    }
+
+    async def start_run(self, document_set: UCDocumentSet,
+                        review_milestones: bool = True) -> PipelineRun:
         """Start a new pipeline run for the given document set."""
         config_snapshot = self.config.model_dump() if hasattr(self.config, "model_dump") else dict(self.config)
 
@@ -51,30 +67,40 @@ class PipelineOrchestrator:
         await self.db.insert_model("pipeline_runs", run.model_dump())
 
         # Launch pipeline as background task
-        task = asyncio.create_task(self._execute_pipeline(run, document_set))
+        task = asyncio.create_task(
+            self._execute_pipeline(run, document_set, review_milestones=review_milestones)
+        )
         self._active_tasks[run.id] = task
         return run
 
-    async def cancel_run(self, run_id: UUID) -> PipelineRun | None:
+    async def cancel_run(self, run_id: UUID) -> None:
         """Cancel a running pipeline. Completed step artifacts are preserved."""
-        task = self._active_tasks.get(run_id)
-        if task and not task.done():
-            task.cancel()
-
+        # Mark as cancelled in DB immediately
         await self.db.update("pipeline_runs", str(run_id), {
             "status": PipelineStatus.CANCELLED.value,
             "completed_at": datetime.now(timezone.utc).isoformat(),
         })
 
-        await event_bus.publish(PipelineEvent(
-            run_id=run_id, event_type="run_cancelled",
-        ))
+        # Release any milestone wait
+        evt = self._milestone_events.get(run_id)
+        if evt:
+            self._milestone_decisions[run_id] = "cancel"
+            evt.set()
 
-        rows = await self.db.get_by_id("pipeline_runs", str(run_id))
-        return PipelineRun(**rows) if rows else None
+        # Cancel the background task (best effort)
+        task = self._active_tasks.pop(run_id, None)
+        if task and not task.done():
+            task.cancel()
 
     async def get_run_status(self, run_id: UUID) -> dict | None:
         return await self.db.get_by_id("pipeline_runs", str(run_id))
+
+    async def respond_to_milestone(self, run_id: UUID, decision: str) -> None:
+        """User responds to a milestone pause: 'continue', 'rerun', or 'cancel'."""
+        self._milestone_decisions[run_id] = decision
+        evt = self._milestone_events.get(run_id)
+        if evt:
+            evt.set()
 
     async def respond_to_hil(self, hil_id: UUID, response: str) -> None:
         await hil_handler.respond(hil_id, response)
@@ -84,32 +110,82 @@ class PipelineOrchestrator:
             "answered_at": datetime.now(timezone.utc).isoformat(),
         })
 
+    async def rerun(self, run_id: UUID) -> PipelineRun:
+        """Re-run a previous pipeline using its original document set."""
+        # Get the old run to find its document_set_id
+        old_run = await self.db.get_by_id("pipeline_runs", str(run_id))
+        if not old_run:
+            raise ValueError(f"Run {run_id} not found")
+
+        doc_set_id = old_run.get("document_set_id")
+        doc_row = await self.db.get_by_id("uc_document_sets", str(doc_set_id))
+        if not doc_row:
+            raise ValueError(f"Document set {doc_set_id} not found")
+
+        # Create a new UCDocumentSet with a fresh ID but same files
+        new_doc_set = UCDocumentSet(
+            uc_name=doc_row["uc_name"],
+            ciq_file_path=doc_row["ciq_file_path"],
+            mop_file_path=doc_row["mop_file_path"],
+            sample_io_xml_paths=json.loads(doc_row["sample_io_xml_paths"]) if doc_row.get("sample_io_xml_paths") else [],
+            constraints_file_path=doc_row.get("constraints_file_path"),
+            command_outputs_path=doc_row["command_outputs_path"],
+            additional_documents=json.loads(doc_row["additional_documents"]) if doc_row.get("additional_documents") else None,
+            validated=True,
+        )
+        return await self.start_run(new_doc_set)
+
     async def list_runs(self, filters: dict | None = None) -> list[dict]:
-        where = ""
-        params: tuple = ()
+        clauses = []
+        vals: list = []
         if filters:
-            clauses = []
-            vals: list = []
             if filters.get("uc_name"):
-                clauses.append("document_set_id IN (SELECT id FROM uc_document_sets WHERE uc_name LIKE ?)")
+                clauses.append("d.uc_name LIKE ?")
                 vals.append(f"%{filters['uc_name']}%")
             if filters.get("status"):
-                clauses.append("status = ?")
+                clauses.append("r.status = ?")
                 vals.append(filters["status"])
-            where = " AND ".join(clauses)
-            params = tuple(vals)
-        return await self.db.query("pipeline_runs", where=where, params=params,
-                                    order_by="started_at DESC")
+        where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        sql = (
+            "SELECT r.id, d.uc_name, r.status, r.started_at, r.completed_at, "
+            "r.duration_seconds, r.current_step, r.error_summary "
+            "FROM pipeline_runs r "
+            "LEFT JOIN uc_document_sets d ON r.document_set_id = d.id"
+            f"{where} ORDER BY r.started_at DESC"
+        )
+        return await self.db.execute(sql, tuple(vals))
 
-    async def _execute_pipeline(self, run: PipelineRun, doc_set: UCDocumentSet) -> None:
+    async def _execute_pipeline(self, run: PipelineRun, doc_set: UCDocumentSet,
+                                review_milestones: bool = True) -> None:
         """Execute all 9 pipeline steps sequentially."""
         try:
+            # Refresh config from ConfigManager to pick up settings changes made via UI
+            if self.config_manager is not None:
+                try:
+                    self.config = await self.config_manager.get_config()
+                except Exception:
+                    pass  # fall back to existing config
+
             run.status = PipelineStatus.RUNNING
             run.started_at = datetime.now(timezone.utc)
             await self.db.update("pipeline_runs", str(run.id), {
                 "status": run.status.value,
                 "started_at": run.started_at.isoformat(),
             })
+
+            # Set API key in environment for liteLLM
+            import os
+            api_key = getattr(self.config, "openrouter_api_key", "") if hasattr(self.config, "openrouter_api_key") else ""
+            if not api_key:
+                # Try loading from DB settings
+                try:
+                    rows = await self.db.query("settings", where="key = ?", params=("api_key",))
+                    if rows:
+                        api_key = rows[0].get("value", "")
+                except Exception:
+                    pass
+            if api_key:
+                os.environ["OPENROUTER_API_KEY"] = api_key
 
             # Initialize agents
             agents = self._create_agents()
@@ -126,10 +202,22 @@ class PipelineOrchestrator:
             step_data: dict[str, Any] = {
                 "document_set": doc_set.model_dump(),
                 "run_dir": str(run_dir),
+                "uc_name": doc_set.uc_name,
                 "ciq_file_path": doc_set.ciq_file_path,
             }
 
-            for step_num in range(1, 10):
+            step_num = 0
+            while step_num < 9:
+                step_num += 1
+
+                # Check if cancelled externally
+                run_row = await self.db.get_by_id("pipeline_runs", str(run.id))
+                if run_row and run_row.get("status") in (
+                    PipelineStatus.CANCELLED.value, "cancelled",
+                ):
+                    logger.info("Pipeline %s cancelled externally, stopping", run.id)
+                    return
+
                 agent = agents[step_num]
                 run.current_step = step_num
                 await self.db.update("pipeline_runs", str(run.id), {"current_step": step_num})
@@ -147,23 +235,35 @@ class PipelineOrchestrator:
                     payload={"step_name": agent.step_name},
                 ))
 
-                # Execute with retry
+                # Execute with retry (skip retries for deterministic steps 7-9)
                 async def _exec(**kwargs):
                     return (await agent.execute(
                         input_data=step_data,
                         config=self.config,
-                        few_shot_examples=few_shot_examples if step_num <= 6 else None,
+                        few_shot_examples=few_shot_examples if step_num in (1, 2, 3, 4, 6, 7) else None,
                         **kwargs,
                     )).model_dump()
 
-                result = await retry_mgr.execute_with_retry(
-                    step_num, _exec,
-                    on_retry=lambda s, n, e: event_bus.publish(PipelineEvent(
-                        run_id=run.id, event_type="retry_started",
-                        step_number=s,
-                        payload={"attempt": n, "error": str(e)},
-                    )),
-                )
+                if step_num in (5, 8, 9):
+                    # Deterministic steps — run once, no retries
+                    try:
+                        raw = await _exec()
+                        step_status = raw.get("status", "passed")
+                        # Steps 5 & 8: always flow to milestone review (pass or fail)
+                        # Step 9: always succeeds (final report)
+                        result = {"success": True, "result": raw, "attempts": [], "needs_cascade": False}
+                    except Exception as exc:
+                        result = {"success": False, "result": {}, "attempts": [],
+                                  "error": str(exc), "needs_cascade": False}
+                else:
+                    result = await retry_mgr.execute_with_retry(
+                        step_num, _exec,
+                        on_retry=lambda s, n, e: event_bus.publish(PipelineEvent(
+                            run_id=run.id, event_type="retry_started",
+                            step_number=s,
+                            payload={"attempt": n, "error": str(e)},
+                        )),
+                    )
 
                 if result["success"]:
                     output = result["result"]
@@ -190,29 +290,199 @@ class PipelineOrchestrator:
                     # Update step data for next step
                     step_output = output.get("output_data", {})
                     if step_num <= 2:
+                        # Steps 1-2: Build intermediate representation
                         step_data["intermediate_repr"] = step_output
                         run.intermediate_repr = step_output
-                    elif step_num <= 6:
+                        # Flatten IR fields into step_data for generation agents
+                        if isinstance(step_output, dict):
+                            for ir_key in ("uc_metadata", "ciq_data", "mop_data",
+                                           "constraints", "command_outputs",
+                                           "simulator_config", "field_types"):
+                                if ir_key in step_output:
+                                    step_data[ir_key] = step_output[ir_key]
+                    elif step_num in (3, 4, 6, 7):
+                        # LLM generation steps: accumulate YAML artifacts
                         artifacts = step_data.get("artifacts", {})
                         artifacts.update(step_output)
                         step_data["artifacts"] = artifacts
+                    elif step_num == 5:
+                        # CIQ validation test results
+                        step_data["ciq_test_results"] = step_output
                     elif step_num == 8:
-                        step_data["test_results"] = step_output
+                        # Execution test results
+                        step_data["exec_test_results"] = step_output
                     elif step_num == 9:
+                        # Final report paths
                         step_data["report_paths"] = step_output
 
                     # Save artifacts
                     for artifact_path in output.get("artifacts", []):
                         if Path(artifact_path).exists():
+                            cfg_type = self._infer_config_type(artifact_path)
+                            if cfg_type is None:
+                                continue  # skip unrecognized file types
                             content_hash = self.artifact_store.content_hash(artifact_path)
                             await self.db.insert_model("generated_configs", GeneratedConfig(
                                 run_id=run.id,
-                                config_type=self._infer_config_type(artifact_path),
+                                config_type=cfg_type,
                                 file_path=artifact_path,
                                 schema_valid=step_num >= 7,
                                 generated_by_step=step_num,
                                 content_hash=content_hash,
                             ).model_dump())
+
+                    # --- Milestone review pause ---
+                    if review_milestones and step_num in self.MILESTONE_STEPS:
+                        # Write artifact to disk so user can review
+                        uc_name = doc_set.uc_name
+                        artifact_key_map = {
+                            3: ("validation_rules_yaml", f"{uc_name}_validation-rules.yaml"),
+                            4: ("json_template_yaml", f"{uc_name}_json-output.yaml"),
+                            6: ("workflow_yaml", f"{uc_name}.yaml"),
+                            7: ("simulator_config_yaml", f"{uc_name}_simulator-config.yaml"),
+                        }
+
+                        if step_num == 5:
+                            # Step 5: HTML test report generated by test executor
+                            ak = "ciq_test_results"
+                            html_report = step_output.get("report_html", "")
+                            if html_report and Path(html_report).exists():
+                                artifact_file = html_report
+                            else:
+                                # Fallback: write plain text summary
+                                fname = f"{uc_name}_ciq-test-results.txt"
+                                artifact_file = str(run_dir / fname)
+                                self._write_test_results_summary(
+                                    artifact_file, step_output, uc_name, mode="ciq",
+                                )
+                        elif step_num == 8:
+                            # Step 8: write execution test results summary for review
+                            ak = "exec_test_results"
+                            fname = f"{uc_name}_exec-test-results.txt"
+                            artifact_file = str(run_dir / fname)
+                            self._write_test_results_summary(
+                                artifact_file, step_output, uc_name, mode="exec",
+                            )
+                        else:
+                            ak, fname = artifact_key_map.get(step_num, ("", ""))
+                            content = step_data.get("artifacts", {}).get(ak, "")
+                            artifact_file = None
+                            if content and fname:
+                                artifact_file = str(run_dir / fname)
+                                Path(artifact_file).write_text(content, encoding="utf-8")
+
+                        run.status = PipelineStatus.PAUSED_MILESTONE
+                        await self.db.update("pipeline_runs", str(run.id), {
+                            "status": PipelineStatus.PAUSED_MILESTONE.value,
+                        })
+
+                        milestone_name = self.MILESTONE_NAMES.get(step_num, f"Step {step_num}")
+                        milestone_payload = {
+                            "milestone": milestone_name,
+                            "artifact_file": artifact_file,
+                            "artifact_key": ak,
+                        }
+                        # For test steps 5 & 8, include test pass/fail status
+                        if step_num in (5, 8):
+                            test_status = output.get("status", "passed")
+                            milestone_payload["test_status"] = test_status
+                            if test_status == "failed":
+                                failed_labels = {
+                                    5: "CIQ Test Results — FAILED",
+                                    8: "Execution Test Results — FAILED",
+                                }
+                                milestone_payload["milestone"] = failed_labels.get(step_num, milestone_name)
+
+                        # Create event BEFORE publishing so _restore_active_run
+                        # can find it (avoids race with the 0.5s restore timer)
+                        evt = asyncio.Event()
+                        self._milestone_events[run.id] = evt
+                        self._milestone_decisions.pop(run.id, None)
+
+                        await event_bus.publish(PipelineEvent(
+                            run_id=run.id, event_type="milestone_reached",
+                            step_number=step_num,
+                            payload=milestone_payload,
+                        ))
+
+                        # Wait for user decision
+                        await evt.wait()
+                        decision = self._milestone_decisions.pop(run.id, "continue")
+                        self._milestone_events.pop(run.id, None)
+
+                        if decision == "cancel":
+                            run.status = PipelineStatus.CANCELLED
+                            run.completed_at = datetime.now(timezone.utc)
+                            await self.db.update("pipeline_runs", str(run.id), {
+                                "status": PipelineStatus.CANCELLED.value,
+                                "completed_at": run.completed_at.isoformat(),
+                            })
+                            await event_bus.publish(PipelineEvent(
+                                run_id=run.id, event_type="run_cancelled",
+                            ))
+                            return
+                        elif decision == "rerun":
+                            run.status = PipelineStatus.RUNNING
+                            await self.db.update("pipeline_runs", str(run.id), {
+                                "status": PipelineStatus.RUNNING.value,
+                            })
+                            # Delete the step result so it can be re-created
+                            await self.db.execute_insert(
+                                "DELETE FROM step_results WHERE id = ?",
+                                (str(step_result.id),),
+                            )
+
+                            if step_num == 5:
+                                # Step 5 rerun: go back to step 3 to re-generate
+                                # validation rules + JSON output, then re-test
+                                step_data.get("artifacts", {}).pop("validation_rules_yaml", None)
+                                step_data.get("artifacts", {}).pop("json_template_yaml", None)
+                                step_data.pop("ciq_test_results", None)
+                                # Delete step 3, 4, 5 results for clean re-run
+                                await self.db.execute_insert(
+                                    "DELETE FROM step_results WHERE run_id = ? AND step_number IN (3, 4, 5)",
+                                    (str(run.id),),
+                                )
+                                await event_bus.publish(PipelineEvent(
+                                    run_id=run.id, event_type="retry_started",
+                                    step_number=3,
+                                    payload={"attempt": 1, "error": "User requested re-run from Step 5 review"},
+                                ))
+                                step_num = 2  # will increment to 3 at loop top
+                            elif step_num == 8:
+                                # Step 8 rerun: go back to step 6 to re-generate
+                                # workflow + simulator config, then re-test
+                                step_data.get("artifacts", {}).pop("workflow_yaml", None)
+                                step_data.get("artifacts", {}).pop("simulator_config_yaml", None)
+                                step_data.pop("exec_test_results", None)
+                                # Delete step 6, 7, 8 results for clean re-run
+                                await self.db.execute_insert(
+                                    "DELETE FROM step_results WHERE run_id = ? AND step_number IN (6, 7, 8)",
+                                    (str(run.id),),
+                                )
+                                await event_bus.publish(PipelineEvent(
+                                    run_id=run.id, event_type="retry_started",
+                                    step_number=6,
+                                    payload={"attempt": 1, "error": "User requested re-run from Step 8 review"},
+                                ))
+                                step_num = 5  # will increment to 6 at loop top
+                            else:
+                                # LLM steps: re-run this step
+                                step_data.get("artifacts", {}).pop(ak, None)
+                                await event_bus.publish(PipelineEvent(
+                                    run_id=run.id, event_type="retry_started",
+                                    step_number=step_num,
+                                    payload={"attempt": 1, "error": "User requested re-run"},
+                                ))
+                                step_num -= 1  # decrement so while loop re-runs same step
+                            continue
+                        else:
+                            # Continue
+                            run.status = PipelineStatus.RUNNING
+                            await self.db.update("pipeline_runs", str(run.id), {
+                                "status": PipelineStatus.RUNNING.value,
+                            })
+
                 else:
                     step_result.status = StepStatus.FAILED
                     step_result.error_message = result.get("error", "Unknown error")
@@ -255,6 +525,15 @@ class PipelineOrchestrator:
 
         except asyncio.CancelledError:
             logger.info("Pipeline %s cancelled", run.id)
+            try:
+                run.status = PipelineStatus.CANCELLED
+                run.completed_at = datetime.now(timezone.utc)
+                await self.db.update("pipeline_runs", str(run.id), {
+                    "status": PipelineStatus.CANCELLED.value,
+                    "completed_at": run.completed_at.isoformat(),
+                })
+            except Exception:
+                pass
         except Exception as exc:
             logger.exception("Pipeline %s failed: %s", run.id, exc)
             await self.db.update("pipeline_runs", str(run.id), {
@@ -273,19 +552,22 @@ class PipelineOrchestrator:
         from src.agents.doc_parser_agent import DocParserAgent
         from src.agents.uc_analyzer_agent import UCAnalyzerAgent
         from src.agents.validation_gen_agent import ValidationGenAgent
-        from src.agents.json_template_agent import JSONTemplateAgent
+        from src.agents.json_template_agent import JsonTemplateAgent
         from src.agents.workflow_gen_agent import WorkflowGenAgent
         from src.agents.script_gen_agent import ScriptGenAgent
-        from src.agents.schema_validator import SchemaValidator
         from src.agents.test_executor import TestExecutor
         from src.agents.report_generator import ReportGenerator
 
         return {
-            1: DocParserAgent(), 2: UCAnalyzerAgent(),
-            3: ValidationGenAgent(), 4: JSONTemplateAgent(),
-            5: WorkflowGenAgent(), 6: ScriptGenAgent(),
-            7: SchemaValidator(), 8: TestExecutor(),
-            9: ReportGenerator(),
+            1: DocParserAgent(),           # LLM: Parse documents → IR
+            2: UCAnalyzerAgent(),          # LLM: Enrich IR
+            3: ValidationGenAgent(),       # LLM: validation-rules.yaml
+            4: JsonTemplateAgent(),        # LLM: json-output.yaml
+            5: TestExecutor(mode="ciq"),   # Deterministic: ciq-processor JAR test
+            6: WorkflowGenAgent(),         # LLM: workflow.yaml
+            7: ScriptGenAgent(),           # LLM: simulator-config.yaml
+            8: TestExecutor(mode="exec"),  # Deterministic: cli-automation JAR test
+            9: ReportGenerator(),          # Deterministic: combined report
         }
 
     async def _load_few_shot(self, uc_name: str) -> list[dict]:
@@ -332,16 +614,153 @@ class PipelineOrchestrator:
         ))
 
     @staticmethod
-    def _infer_config_type(path: str) -> str:
-        name = Path(path).stem.lower()
-        if "validation" in name:
+    def _write_test_results_summary(
+        filepath: str, test_output: dict, uc_name: str, mode: str = "ciq",
+    ) -> None:
+        """Write a human-readable test results summary for milestone review.
+
+        mode="ciq"  — Step 5: CIQ validation tests (validation_test, json_output_test)
+        mode="exec" — Step 8: Execution tests (execution_test)
+        """
+        results = test_output.get("results", {}) if isinstance(test_output, dict) else {}
+
+        if mode == "ciq":
+            lines = [
+                f"CIQ Validation Test Report — {uc_name}",
+                "=" * 60,
+                "",
+            ]
+
+            test_cases = test_output.get("test_cases", []) if isinstance(test_output, dict) else []
+            if not test_cases:
+                lines.append("[SKIPPED] No test cases were executed")
+                lines.append("")
+            else:
+                for i, tc in enumerate(test_cases, 1):
+                    name = tc.get("name", f"Test Case {i}")
+                    status = tc.get("status", "UNKNOWN")
+                    lines.append(f"[{status}] {name}")
+
+                    # Show error if failed
+                    error = tc.get("error", "")
+                    if error:
+                        lines.append(f"  Error: {error}")
+
+                    # Show stdout summary (key=value lines from JAR)
+                    stdout = tc.get("stdout", "")
+                    if stdout and stdout.strip():
+                        for line in stdout.strip().splitlines():
+                            lines.append(f"  {line}")
+
+                    # Show stderr if present
+                    stderr = tc.get("stderr", "")
+                    if stderr and stderr.strip():
+                        lines.append(f"  stderr: {stderr.strip()}")
+
+                    # Show parsed validation report details
+                    report = tc.get("report", {})
+                    if report:
+                        lines.append(f"  Validation Status: {report.get('status', 'N/A')}")
+                        lines.append(f"  Total Errors: {report.get('totalErrors', 0)}")
+                        sheets = report.get("sheets", [])
+                        if sheets:
+                            lines.append(f"  Sheets Validated:")
+                            for sh in sheets:
+                                sh_status = sh.get("status", "?")
+                                sh_name = sh.get("sheetName", "?")
+                                sh_rows = sh.get("rowsChecked", 0)
+                                sh_errs = len(sh.get("errors", []))
+                                lines.append(f"    [{sh_status}] {sh_name}  ({sh_rows} rows, {sh_errs} errors)")
+                                for err in sh.get("errors", [])[:5]:
+                                    row = err.get("row", "?")
+                                    col = err.get("column", "?")
+                                    msg = err.get("message", str(err))
+                                    lines.append(f"          Row {row}, {col}: {msg}")
+                        global_errs = report.get("globalErrors", [])
+                        if global_errs:
+                            lines.append(f"  Global Errors:")
+                            for ge in global_errs[:5]:
+                                lines.append(f"    - {ge}")
+                        params = report.get("parameters", {})
+                        if params:
+                            lines.append(f"  Output Parameters:")
+                            for pk, pv in params.items():
+                                lines.append(f"    {pk}: {pv}")
+
+                    # Show JSON output structure details (TC3)
+                    details = tc.get("details", {})
+                    if details:
+                        lines.append(f"  JSON Output Structure:")
+                        lines.append(f"    Schema Version: {details.get('schemaVersion', 'N/A')}")
+                        lines.append(f"    CR Groups: {details.get('crGroups', 0)}")
+                        lines.append(f"    Total Nodes: {details.get('totalNodes', 0)}")
+                        lines.append(f"    Config Data Rows: {details.get('totalConfigRows', 0)}")
+
+                    lines.append("")
+
+            rerun_tip = "Click 'Re-run Steps 3-5' to re-generate validation rules and JSON output, then re-test."
+
+        else:  # mode == "exec"
+            lines = [
+                f"Execution Test Results — {uc_name}",
+                "=" * 60,
+                "",
+            ]
+
+            et = results.get("execution_test", {})
+            if et:
+                rc = et.get("returncode", "N/A")
+                status = "PASSED" if rc == 0 else "FAILED"
+                lines.append(f"[{status}] Workflow Execution Test  (exit code: {rc})")
+                if et.get("stdout", "").strip():
+                    lines.append(f"  stdout: {et['stdout'].strip()}")
+                if et.get("stderr", "").strip():
+                    lines.append(f"  stderr: {et['stderr'].strip()}")
+                lines.append("")
+            else:
+                lines.append("[SKIPPED] Workflow Execution Test — not executed")
+                lines.append("")
+
+            rerun_tip = "Click 'Re-run Steps 6-8' to re-generate workflow and simulator config, then re-test."
+
+        # Overall
+        test_cases = test_output.get("test_cases", []) if isinstance(test_output, dict) else []
+        all_results = list(results.values()) if results else []
+        all_passed = (
+            all(tc.get("status") == "PASSED" for tc in test_cases)
+            if test_cases
+            else all(r.get("returncode") == 0 for r in all_results if isinstance(r, dict) and "returncode" in r)
+        )
+        has_results = bool(test_cases) or any(
+            isinstance(r, dict) and "returncode" in r for r in all_results
+        )
+        if has_results:
+            lines.append("=" * 60)
+            lines.append(f"Overall: {'ALL TESTS PASSED' if all_passed else 'SOME TESTS FAILED'}")
+            if not all_passed:
+                lines.append("")
+                lines.append(f"Tip: {rerun_tip}")
+        else:
+            lines.append("=" * 60)
+            lines.append("No tests were executed (JAR not found or no artifacts available)")
+
+        Path(filepath).write_text("\n".join(lines), encoding="utf-8")
+
+    @staticmethod
+    def _infer_config_type(path: str) -> str | None:
+        """Infer config type from filename. Returns None for unrecognized files."""
+        p = Path(path)
+        name = p.stem.lower()
+        suffix = p.suffix.lower()
+        if "validation" in name or "rules" in name:
             return "validation_rules"
-        if "json_template" in name or "template" in name:
+        if "json-output" in name or "json_template" in name or "template" in name:
             return "json_template"
-        if "workflow" in name:
-            return "workflow"
         if "simulator" in name:
             return "simulator_config"
-        if name.endswith(".py"):
+        if suffix == ".py":
             return "python_script"
-        return "unknown"
+        # workflow is the base UC name file (NODE_ACTIVITY.yaml) — match last
+        if suffix == ".yaml" and "report" not in name and "config" not in name:
+            return "workflow"
+        return None

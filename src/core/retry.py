@@ -50,7 +50,8 @@ class RetryManager:
             try:
                 result = await execute_fn(*args, retry_context=retry_context, **kwargs)
 
-                if result.get("status") == "passed":
+                status = result.get("status", "")
+                if status in ("passed", "needs_hil"):
                     return {
                         "success": True,
                         "result": result,
@@ -63,10 +64,10 @@ class RetryManager:
                 test_retries += 1
 
                 attempt = RetryAttempt(
-                    step_result_id=result.get("step_result_id", ""),
+                    step_result_id=result.get("step_result_id") or None,
                     attempt_number=test_retries,
                     retry_type=RetryType.TEST_FAILURE,
-                    error_context=error,
+                    error_context=error if isinstance(error, dict) else {"message": str(error)},
                     outcome=RetryOutcome.FAILURE,
                 )
                 attempts.append(attempt)
@@ -84,8 +85,8 @@ class RetryManager:
                 # Build retry context for next attempt
                 retry_context = RetryContext(
                     attempt_number=test_retries + 1,
-                    previous_error=error,
-                    previous_output=result.get("output_data", {}),
+                    previous_error=error if isinstance(error, dict) else {"message": str(error)} if error else {},
+                    previous_output=result.get("output_data") or {},
                 )
 
                 if on_retry:
@@ -100,7 +101,7 @@ class RetryManager:
                 infra_retries += 1
 
                 attempt = RetryAttempt(
-                    step_result_id="",
+                    step_result_id=None,
                     attempt_number=infra_retries,
                     retry_type=RetryType.INFRASTRUCTURE_ERROR,
                     error_context={"message": str(exc)},

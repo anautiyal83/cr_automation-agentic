@@ -11,6 +11,7 @@ EventType = Literal[
     "step_completed",
     "step_failed",
     "retry_started",
+    "milestone_reached",
     "hil_requested",
     "hil_responded",
     "run_completed",

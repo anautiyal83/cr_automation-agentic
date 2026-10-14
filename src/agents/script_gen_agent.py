@@ -20,8 +20,8 @@ def _extract_yaml(text: str) -> str:
 
 
 class ScriptGenAgent:
-    step_number = 6
-    step_name = "Script + Simulator Config Generator"
+    step_number = 7
+    step_name = "Simulator Config Generator"
 
     async def execute(
         self,
@@ -30,7 +30,7 @@ class ScriptGenAgent:
         few_shot_examples: list[dict] | None = None,
         retry_context: RetryContext | None = None,
     ) -> StepOutput:
-        model = get_model_for_step(6, config)
+        model = get_model_for_step(7, config)
 
         schema_path = Path("schemas/simulator_config.schema.yaml")
         schema = schema_path.read_text(encoding="utf-8") if schema_path.exists() else ""
@@ -61,16 +61,22 @@ class ScriptGenAgent:
                 "Fix the issues and regenerate."
             )
 
+        uc_name = input_data.get("uc_name", "UC")
         # Generate simulator_config.yaml
         sim_prompt = (
-            f"Generate a simulator_config.yaml for this UC:\n\n{ir_summary}\n\n"
+            f"Generate a simulator_config.yaml for UC: {uc_name}\n\n"
+            f"Input data (MOP steps and command outputs):\n{ir_summary}\n\n"
             f"Schema reference:\n{schema}\n\n"
             f"{few_shot_text}{retry_info}\n\n"
-            "Return ONLY valid YAML content."
+            "Generate mock simulator entries that match the command patterns from the MOP "
+            "and return the expected responses from the command output documents.\n"
+            "Each mock_entry needs: command_pattern (regex matching the CLI command or REST endpoint), "
+            "response_template (the mock response to return).\n"
+            "Return ONLY valid YAML content, no markdown fences."
         )
         sim_system = (
-            "You are a YAML config generator for the cr-automation framework. "
-            "Generate simulator_config.yaml conforming exactly to the schema."
+            "You are a telecom UC config generator for the cr-automation framework. "
+            "Generate simulator_config.yaml with mock entries mapping commands to expected responses."
         )
 
         sim_response = await call_llm(sim_prompt, system_prompt=sim_system, model=model)

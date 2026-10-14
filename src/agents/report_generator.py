@@ -28,12 +28,13 @@ class ReportGenerator:
         retry_context: RetryContext | None = None,
     ) -> StepOutput:
         run_dir = Path(input_data.get("run_dir", "."))
+        uc_name = input_data.get("uc_name", "UC")
         run_data = input_data.get("run_data", {})
         step_results = input_data.get("step_results", [])
         regression_diff = input_data.get("regression_diff")
 
-        html_path = run_dir / "report.html"
-        excel_path = run_dir / "report.xlsx"
+        html_path = run_dir / f"{uc_name}_report.html"
+        excel_path = run_dir / f"{uc_name}_report.xlsx"
 
         # Generate HTML report
         html = self._generate_html(run_data, step_results, regression_diff)

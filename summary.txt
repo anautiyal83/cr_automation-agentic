@@ -1,0 +1,79 @@
+  Google ADK vs Current Approach (Direct liteLLM)
+
+  What We Have Now
+
+  Plain Python classes with execute() → litellm.acompletion() → OpenRouter. Simple, works, but no framework features.
+
+  What ADK Would Give Us
+
+  Pros:
+
+  ┌──────────────────────┬──────────────────────────────────────────────────────────────────────────────────────────┐
+  │       Feature        │                                 Benefit for Our Project                                  │
+  ├──────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────┤
+  │ Multi-agent          │ Built-in sequential/parallel/loop agent composition — our 9-step pipeline could use DAG  │
+  │ orchestration        │ workflows instead of manual while loop                                                   │
+  ├──────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────┤
+  │ Built-in HIL         │ Resumable human-in-the-loop execution natively — replace our custom asyncio.Event        │
+  │                      │ milestone/HIL wait logic                                                                 │
+  ├──────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────┤
+  │ Session state        │ Automatic state management between steps — replace our manual step_data dict passing     │
+  ├──────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────┤
+  │ Observability        │ Trace views, logging, debugging UI built-in — replace our manual event bus               │
+  ├──────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────┤
+  │ Evaluation framework │ Evalsets + LLM-as-judge scoring — could validate generated YAMLs quality                 │
+  ├──────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────┤
+  │ Model-agnostic       │ Native Gemini support + LiteLLM plugin for Claude/GPT — we already use liteLLM, ADK      │
+  │                      │ wraps it                                                                                 │
+  ├──────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────┤
+  │ Deployment           │ One-command deploy to Vertex AI, Cloud Run, GKE                                          │
+  ├──────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────┤
+  │ Dev UI               │ Built-in web UI for agent debugging and testing                                          │
+  └──────────────────────┴──────────────────────────────────────────────────────────────────────────────────────────┘
+
+  Cons:
+
+  ┌────────────────────────┬────────────────────────────────────────────────────────────────────────────────────────┐
+  │        Concern         │                                         Impact                                         │
+  ├────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────┤
+  │ Overkill for our use   │ Our pipeline is linear (not truly multi-agent), ADK adds complexity                    │
+  │ case                   │                                                                                        │
+  ├────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────┤
+  │ Migration effort       │ Rewrite all 9 agents to ADK Agent classes, change pipeline orchestrator                │
+  ├────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────┤
+  │ Dependency weight      │ ADK pulls in google-genai, google-auth, protobuf, etc. — heavier                       │
+  ├────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────┤
+  │ Gemini bias            │ Optimized for Gemini; other models via LiteLLM work but less tested                    │
+  ├────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────┤
+  │ Learning curve         │ Team needs to learn ADK patterns (Context, Workflow, Tool decorators)                  │
+  ├────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────┤
+  │ Our custom features    │ Milestone review, cascading filters, settings persistence — all custom NiceGUI code    │
+  │ break                  │ unaffected, but pipeline core needs rewrite                                            │
+  ├────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────┤
+  │ Unpredictable agent    │ ADK's agent loop can be unpredictable — our deterministic steps 7-9 work better as     │
+  │ behavior               │ plain functions                                                                        │
+  └────────────────────────┴────────────────────────────────────────────────────────────────────────────────────────┘
+
+  My Recommendation
+
+  Don't adopt ADK now. Here's why:
+
+  1. Our pipeline is sequential, not multi-agent — each step feeds the next, no parallel coordination needed
+  2. We already have working HIL + milestone review — ADK's HIL would require rewriting this
+  3. Steps 7-9 are deterministic — ADK agents are overkill for schema validation and report generation
+  4. The NiceGUI frontend is independent — ADK's dev UI doesn't help us
+  5. Migration cost is high for marginal benefit
+
+  Consider ADK later if:
+  - We need parallel agent execution (e.g., steps 3-5 running simultaneously)
+  - We want to deploy agents as standalone services
+  - We add more complex multi-agent workflows (e.g., agent-to-agent negotiation)
+
+  Want me to remove the unused google-adk dependency from pyproject.toml to reduce install size?
+
+  Sources:
+  - https://github.com/google/adk-python
+  - https://medium.com/codex/building-ai-agents-with-the-python-agent-development-kit-adk-2026-edition-v2-082c0b5eb360
+  - https://github.com/google/adk-python/discussions/2593
+  - https://visagetechnologies.com/blog/agent-framework-comparison-llamaindex-vs-langgraph-vs-adk/
+  - https://sidbharath.com/blog/the-complete-guide-to-googles-agent-development-kit-adk/

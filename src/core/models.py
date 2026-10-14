@@ -23,6 +23,7 @@ class PipelineStatus(str, Enum):
     PENDING = "pending"
     RUNNING = "running"
     PAUSED_HIL = "paused_hil"
+    PAUSED_MILESTONE = "paused_milestone"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
@@ -68,9 +69,11 @@ class UCDocumentSet(BaseModel):
     uc_name: str = Field(..., max_length=200)
     ciq_file_path: str
     mop_file_path: str
+    sample_io_xml_paths: list[str] = Field(default_factory=list)
     constraints_file_path: str | None = None
     command_outputs_path: str
     uploaded_at: datetime = Field(default_factory=_now)
+    additional_documents: list[dict[str, str]] | None = None  # [{"name": str, "path": str}]
     validated: bool = False
     validation_errors: list[dict[str, Any]] | None = None
     selected_sheets: list[str] | None = None  # None = all sheets
@@ -108,10 +111,10 @@ class StepResult(BaseModel):
 
 class RetryAttempt(BaseModel):
     id: uuid.UUID = Field(default_factory=_uuid)
-    step_result_id: uuid.UUID
+    step_result_id: uuid.UUID | None = None
     attempt_number: int = Field(..., ge=1)
     retry_type: RetryType
-    error_context: dict[str, Any]
+    error_context: dict[str, Any] = Field(default_factory=dict)
     agent_prompt: str | None = None
     agent_response: str | None = None
     outcome: RetryOutcome
@@ -224,13 +227,13 @@ class StepOutput(BaseModel):
     status: str  # "passed", "failed", "needs_hil"
     artifacts: list[str] = Field(default_factory=list)
     output_data: dict[str, Any] = Field(default_factory=dict)
-    hil_requests: list[HILRequest] | None = None
+    hil_requests: list[dict[str, Any]] | None = None  # partial dicts; pipeline enriches with run_id/step_number
     error: dict[str, Any] | None = None
 
 
 class RetryContext(BaseModel):
     attempt_number: int
-    previous_error: dict[str, Any]
+    previous_error: dict[str, Any] = Field(default_factory=dict)
     previous_output: dict[str, Any] = Field(default_factory=dict)
 
 

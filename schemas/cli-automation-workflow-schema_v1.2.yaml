@@ -1,0 +1,382 @@
+# ============================================================================
+# CLI Automation Framework — YAML Schema Reference v1.2
+# ============================================================================
+# This file documents every property accepted by the framework's YAML workflow
+# definitions.  It is NOT a JSON Schema / YAML Schema validator — it is a
+# human-readable reference that mirrors the HTML schema document.
+# ============================================================================
+
+# ---------------------------------------------------------------------------
+# Root Document
+# ---------------------------------------------------------------------------
+root:
+  version:        { type: String,    required: false, description: "Workflow definition version (e.g. '1.2')" }
+  name:           { type: String,    required: false, description: "Human-readable workflow name" }
+  globals:        { type: Globals,   required: false, description: "Global variables, secrets, defaults and pre-execution steps" }
+  nodes:          { type: "Map<String, NodeDefinition>", required: false, description: "Named connection endpoints used by steps" }
+  phases:         { type: "Map<String, PhaseBlockDefinition>", required: true,  description: "Ordered map of named phases, each containing steps" }
+  steps:          { type: "List<StepDefinition>", required: false, description: "Top-level steps (alternative to phases for flat workflows)" }
+  notifications:  { type: "Map<String, Object>",  required: false, description: "Email notification configuration for workflow events" }
+
+# ---------------------------------------------------------------------------
+# Globals
+# ---------------------------------------------------------------------------
+globals:
+  vars:           { type: "Map<String, Object>",          description: "Named variables — strings, numbers, lists, or nested maps. Accessible via ${varName} or ${vars.nested.path}." }
+  secrets:        { type: "Map<String, SecretDefinition>", description: "Sensitive values accessed via ${SECRET.key}. Redacted in logs when redacted: true." }
+  defaults:       { type: Defaults,                        description: "Default execution settings applied to all steps unless overridden at step level." }
+  pre_execution:  { type: "List<StepDefinition>",          description: "Steps executed once before any phase begins. Useful for environment validation." }
+
+# ---------------------------------------------------------------------------
+# SecretDefinition
+# ---------------------------------------------------------------------------
+SecretDefinition:
+  value:    { type: String,  description: "The secret value. Can reference ${ENV.VAR} to pull from OS environment." }
+  redacted: { type: Boolean, description: "If true, the value is masked as *** in all log output." }
+
+# ---------------------------------------------------------------------------
+# Defaults (globals.defaults)
+# ---------------------------------------------------------------------------
+defaults:
+  timeout_sec:             { type: Integer, default: 60,       description: "Maximum seconds to wait for a command to complete." }
+  interaction_timeout_sec: { type: Integer, default: 15,       description: "Seconds to wait for an interactive prompt match in expect_reply mode." }
+  exitCode_regex:          { type: String,                     description: "Regex to extract exit code from terminal output. Framework appends a done-marker command; this regex parses it." }
+  retries:                 { type: Integer, default: 0,        description: "Number of retry attempts after first failure." }
+  retry_delay_sec:         { type: Integer, default: 5,        description: "Seconds to wait between retries." }
+  retry_on:                { type: "List<String>",             description: "Failure causes that trigger retry. Values: timeout, non_zero_exit, prompt_timeout, regex_miss." }
+  on_failure:              { type: "String | Object", default: stop, description: "stop, continue, warning, or run: <stepId>. Applied when no step-level override exists." }
+  log_level:               { type: String, default: DETAILED,  description: "Logging verbosity. Values: DETAILED, DEBUG." }
+
+# ---------------------------------------------------------------------------
+# NodeDefinition
+# ---------------------------------------------------------------------------
+NodeDefinition:
+  type:                { type: String, required: true,  description: "Node type: remote (SSH), rest (HTTP), sftp (file transfer), email (SMTP), or local (pseudo-node)." }
+  plugin:              { type: String, required: false, description: "Plugin ID to handle execution. e.g. ssh, rest-plugin, sftp-plugin, email-plugin." }
+  prompt_regex:        { type: String, required: false, description: "Regex matching the shell prompt. Used to detect command completion in interactive mode." }
+  category:            { type: String, required: false, description: "Optional category tag for grouping or filtering nodes." }
+  ssh:                 { type: SshDefinition, required: false, description: "SSH connection settings (for type: remote nodes)." }
+  rest:                { type: Map,    required: false, description: "REST client settings (for type: rest nodes)." }
+  sftp:                { type: Map,    required: false, description: "SFTP client settings (for type: sftp nodes)." }
+  email:               { type: Map,    required: false, description: "Email/SMTP settings (for type: email nodes)." }
+  interactive_prompts: { type: "List<ExpectReplyDefinition>", required: false, description: "Prompts to auto-answer at connection time (e.g. host-key confirmation, password)." }
+
+# ---------------------------------------------------------------------------
+# SshDefinition (nodes.*.ssh)
+# ---------------------------------------------------------------------------
+SshDefinition:
+  host:                    { type: String,  required: true,  description: "Target hostname or IP. Supports ${var} interpolation." }
+  port:                    { type: String,  required: false, description: "SSH port. Default: 22." }
+  user:                    { type: String,  required: true,  description: "SSH login username." }
+  auth:
+    password:              { type: String,  required: false, description: "Password authentication. Use ${SECRET.key} to avoid plain text." }
+    key_path:              { type: String,  required: false, description: "Path to private SSH key file. Typically ${ENV.SSH_KEY_PATH}." }
+  connect_timeout_sec:     { type: String,  required: false, description: "TCP connection timeout." }
+  read_timeout_sec:        { type: String,  required: false, description: "Socket read timeout after connection." }
+  keepalive_sec:           { type: String,  required: false, description: "SSH keepalive interval." }
+  login_retries:           { type: String,  required: false, description: "Number of SSH connection retries on failure." }
+  login_retry_delay_sec:   { type: String,  required: false, description: "Delay between login retries." }
+  strict_host_key_checking: { type: Boolean, required: false, description: "If false, auto-accepts unknown host keys." }
+  known_hosts:             { type: String,  required: false, description: "Path to known_hosts file for host key verification." }
+  ne_id:                   { type: String,  required: false, description: "Network element identifier. Used in Nokia integrations." }
+  elevate_to_root:         { type: Boolean, required: false, description: "If true, the framework elevates the shell to root after login (e.g. via sudo -i)." }
+  kex_algorithms:          { type: String,  required: false, description: "SSH key-exchange algorithms. Mirrors ssh -o KexAlgorithms=... Prefix with + to append to JSch defaults, - to remove, or bare list to replace." }
+  host_key_algorithms:     { type: String,  required: false, description: "SSH host-key algorithms. Same prefix semantics as kex_algorithms." }
+  ciphers:                 { type: String,  required: false, description: "SSH cipher list. Same prefix semantics as kex_algorithms." }
+  macs:                    { type: String,  required: false, description: "SSH MAC algorithms. Same prefix semantics as kex_algorithms." }
+
+# ---------------------------------------------------------------------------
+# REST Node (nodes.*.rest)
+# ---------------------------------------------------------------------------
+RestNodeDefinition:
+  base_url:  { type: String, required: true,  description: "Base URL for all REST requests from this node." }
+  auth:
+    type:                     { type: String, description: "Auth type: bearer, bearer_client_credentials, basic, api_key, header." }
+    token_url:                { type: String, description: "OAuth2 token endpoint URL (for bearer_client_credentials)." }
+    client_id:                { type: String, description: "OAuth2 client ID." }
+    client_secret:            { type: String, description: "OAuth2 client secret. Use ${SECRET.key}." }
+    token_var:                { type: String, description: "Context variable name to cache the access token." }
+    refresh_before_expiry_sec: { type: Integer, description: "Seconds before token expiry to trigger refresh. Default: 60." }
+    username:                 { type: String, description: "Username for basic auth." }
+    password:                 { type: String, description: "Password for basic auth." }
+    header_name:              { type: String, description: "Custom header name (for header auth type)." }
+    header_value:             { type: String, description: "Custom header value (for header auth type)." }
+
+# ---------------------------------------------------------------------------
+# SFTP Node (nodes.*.sftp)
+# ---------------------------------------------------------------------------
+SftpNodeDefinition:
+  host:     { type: String,  required: true,  description: "SFTP server hostname or IP." }
+  port:     { type: Integer, required: false, description: "SFTP port. Default: 22." }
+  user:     { type: String,  required: true,  description: "SFTP login username." }
+  password: { type: String,  required: false, description: "SFTP password. Use ${SECRET.key}." }
+
+# ---------------------------------------------------------------------------
+# Email Node (nodes.*.email)
+# ---------------------------------------------------------------------------
+EmailNodeDefinition:
+  smtp_host:           { type: String,  required: true,  description: "SMTP server hostname." }
+  smtp_port:           { type: Integer, required: false, description: "SMTP port. Default: 25." }
+  starttls:            { type: Boolean, required: false, description: "Enable STARTTLS. Default: false." }
+  ssl:                 { type: Boolean, required: false, description: "Enable SSL. Default: false." }
+  connect_timeout_sec: { type: Integer, required: false, description: "SMTP connection timeout. Default: 10." }
+  read_timeout_sec:    { type: Integer, required: false, description: "SMTP read timeout. Default: 30." }
+  auth:
+    username:          { type: String,  required: false, description: "SMTP auth username. Use ${SECRET.key}." }
+    password:          { type: String,  required: false, description: "SMTP auth password. Use ${SECRET.key}." }
+  defaults:
+    from:              { type: String,  required: false, description: "Default sender address (can be overridden per step)." }
+    subject_prefix:    { type: String,  required: false, description: "Prefix prepended to all email subjects from this node." }
+    body_content_type: { type: String,  required: false, description: "Default content type for email body. text/plain or text/html." }
+
+# ---------------------------------------------------------------------------
+# PhaseBlockDefinition
+# ---------------------------------------------------------------------------
+PhaseBlockDefinition:
+  name:        { type: String,              description: "Human-readable description. Appears in logs and execution JSON." }
+  when:        { type: String,              description: "Condition expression. If false, the entire phase is skipped." }
+  on_failure:  { type: String,              description: "Phase-level failure policy: stop or continue. Overrides global default." }
+  then:        { type: "List<String>",      description: "Phase IDs to execute after this phase (even on failure). Used for rollback/cleanup chains." }
+  vars:        { type: "Map<String, Object>", description: "Phase-scoped variables. Set at phase start, restored/removed at phase end." }
+  var_meta:    { type: "Map<String, String>", description: "Metadata annotations for phase variables (e.g. type hints)." }
+  steps:       { type: "List<StepDefinition>", description: "Ordered list of steps in this phase." }
+
+# ---------------------------------------------------------------------------
+# StepDefinition
+# ---------------------------------------------------------------------------
+StepDefinition:
+  id:                    { type: String,  description: "Unique step identifier. Auto-generated as auto_step_N if omitted. Referenced by on_failure: run: <id>." }
+  node:                  { type: String,  description: "Node key from nodes section, or 'local' for local execution. Supports ${var}." }
+  send:                  { type: String,  description: "Shell command to send/execute. Supports ${var} interpolation." }
+  command_description:   { type: String,  description: "Human-readable description. Shown in logs and execution JSON. Defaults to send value." }
+  when:                  { type: String,  description: "Execute step only when condition is true. If false, step is skipped." }
+  skip_when:             { type: String,  description: "Skip step when condition is true. Inverse of when." }
+  timeout_sec:           { type: Integer, description: "Per-step timeout override. Overrides globals.defaults.timeout_sec." }
+  retries:               { type: Integer, description: "Retry attempts after failure. Overrides global default." }
+  retry_delay_sec:       { type: Integer, description: "Seconds between retries. Overrides global default." }
+  retry_on:              { type: "List<String>", description: "Failure causes that trigger retry at this step. Overrides global default." }
+  use_exit_code:         { type: Boolean, description: "If false, ignores non-zero exit codes — step always passes on completion." }
+  on_failure:            { type: "String | Object", description: "Step-level failure policy: stop, continue, warning, or run: <stepId>." }
+  prompt_regex:          { type: String,  description: "Step-level prompt regex override. Takes precedence over node-level prompt_regex." }
+  type:                  { type: String,  description: "Step type hint (e.g. notification). Usually inferred from node." }
+  execution_criteria:    { type: String,  description: "Additional execution condition expression." }
+  var_meta:              { type: "Map<String, String>", description: "Metadata annotations for variables produced by this step." }
+  register:              { type: "List<RegisterDefinition>", description: "Extract variables from command output using regex." }
+  validation:            { type: ValidationDefinition,       description: "Validate command output." }
+  expect_reply:          { type: "List<ExpectReplyDefinition>", description: "Handle interactive prompts." }
+  for_each:              { type: "String | List", description: "Variable or inline list to iterate over." }
+  item_var:              { type: String,  description: "Context variable name that receives the current iteration value." }
+  max_iterations:        { type: Integer, description: "Maximum number of iterations allowed." }
+  continue_when:         { type: String,  description: "Condition per iteration. If true, skips nested steps for this item." }
+  break_when:            { type: String,  description: "Condition per iteration. If true, exits the loop entirely." }
+  rest:                  { type: Map,     description: "REST step configuration (method, path, body, headers)." }
+  sftp:                  { type: Map,     description: "SFTP step configuration (operation, local/remote paths)." }
+  email:                 { type: Map,     description: "Email step configuration (to, subject, body, attachments)." }
+  steps:                 { type: "List<StepDefinition>", description: "Nested steps (used inside for_each blocks)." }
+
+# ---------------------------------------------------------------------------
+# RegisterDefinition
+# ---------------------------------------------------------------------------
+RegisterDefinition:
+  regex:       { type: String,  description: "Java regex. Use (?P<NAME>...) named groups — group names become variable names automatically." }
+  name:        { type: String,  description: "Variable name to assign when no named group is present, or as the loop base name." }
+  when:        { type: String,  description: "Condition expression. Registration only happens when this evaluates to true." }
+  value:       { type: Object,  description: "Static value to register when the regex matches (instead of the matched text)." }
+  loop:        { type: Boolean, description: "If true, finds ALL matches and stores them as NAME_1, NAME_2, etc." }
+  start_index: { type: Integer, description: "Starting index for loop extraction. Default: 1." }
+  count_var:   { type: String,  description: "Variable name to store total match count when loop: true." }
+
+# ---------------------------------------------------------------------------
+# ValidationDefinition
+# ---------------------------------------------------------------------------
+ValidationDefinition:
+  enabled:     { type: Boolean, default: true, description: "Set to false to disable validation without removing the block." }
+  description: { type: String,  description: "Human-readable description shown in logs and execution JSON under validation_criteria." }
+  success:     { type: ValidationBranchDefinition, description: "Branch evaluated when command exit code = 0." }
+  failure:     { type: ValidationBranchDefinition, description: "Branch evaluated when command exit code != 0." }
+  warning:     { type: ValidationBranchDefinition, description: "Applied when success criteria doesn't match. Step still passes. Logged as [WARN]." }
+
+# ---------------------------------------------------------------------------
+# ValidationBranchDefinition
+# ---------------------------------------------------------------------------
+ValidationBranchDefinition:
+  criteria: { type: SuccessCriteria,       description: "Evaluation criteria for this branch. If omitted, the branch always passes." }
+  message:  { type: String,               description: "Message logged and stored in execution JSON. Supports ${var}." }
+  vars:     { type: "Map<String, Object>", description: "Variables to register in context when this branch is activated. Supports ${var} values." }
+
+# ---------------------------------------------------------------------------
+# SuccessCriteria
+# ---------------------------------------------------------------------------
+SuccessCriteria:
+  exit_code:         { type: Integer, description: "Expected exit code. Criteria passes if exit code equals this value." }
+  http_status:       { type: Integer, description: "Expected HTTP status code (REST steps only)." }
+  transfer_status:   { type: String,  description: "Expected SFTP transfer outcome (SFTP steps only)." }
+  regex:             { type: String,  description: "Regex applied to command output. Passes if at least one match." }
+  expr:              { type: String,  description: "Expression evaluated against context variables. Same syntax as when conditions." }
+  all:               { type: "List<SuccessCriteria>", description: "All sub-criteria must pass (AND logic)." }
+  any:               { type: "List<SuccessCriteria>", description: "At least one sub-criterion must pass (OR logic)." }
+  plugin_validation: { type: Map,     description: "Invokes a ValidationPlugin via SPI. Keys: function, args." }
+
+# ---------------------------------------------------------------------------
+# ExpectReplyDefinition
+# ---------------------------------------------------------------------------
+ExpectReplyDefinition:
+  expect:      { type: String,  description: "Regex pattern to match against the terminal output stream. When matched, the reply is sent." }
+  reply:       { type: "String | List<String>", description: "Text to send when the prompt matches. If a list, uses the Nth entry for the Nth occurrence." }
+  timeout_sec: { type: Integer, description: "Seconds to wait for this prompt. Overrides interaction_timeout_sec." }
+  repeat:      { type: Boolean, description: "If true, the same reply is sent every time this prompt appears, regardless of occurrence count. Default: false." }
+
+# ---------------------------------------------------------------------------
+# REST Step (step.rest)
+# ---------------------------------------------------------------------------
+RestStepDefinition:
+  method:            { type: String, description: "HTTP method: GET, POST, PUT, PATCH, DELETE." }
+  path:              { type: String, description: "URL path appended to the node's base_url. Supports ${var}." }
+  params:            { type: Map,    description: "Query string parameters. Values support ${var}." }
+  body:              { type: Object, description: "Request body. Serialized to JSON for POST/PUT. Supports nested maps." }
+  body_map:          { type: Map,    description: "YAML map auto-serialized to JSON. Alternative to body_json string — avoids manual JSON escaping. Supports ${var} in values." }
+  body_json:         { type: String, description: "Raw JSON string body. Supports ${var} interpolation." }
+  body_file:         { type: String, description: "Path to a file whose contents are sent as the request body." }
+  body_content_type: { type: String, description: "Content-Type header for the body. Default: application/json." }
+  headers:           { type: Map,    description: "Additional HTTP headers per request." }
+  response_template:
+    description: "Extracts JSON response fields into context variables."
+    forms:
+      map_form:  "Map<String, String> — key is variable name, value is dot-path (e.g. my_var: 'data.items[0].id')"
+      list_form: "List<Map> — each entry has 'name' (variable name) and 'json_path' (e.g. '$.data.version')"
+  response_headers:  { type: "List<Map>", description: "Captures HTTP response headers into context variables. Each entry: header (header name), name (variable name), optional default." }
+  save_to_file:      { type: String, description: "Save raw response body to a local file path." }
+  multipart:         { type: Boolean, description: "If true, sends body as multipart/form-data (for file uploads)." }
+  _notes:
+    - "The HTTP status code is automatically stored as ${http_status} in the execution context after every REST step."
+
+# ---------------------------------------------------------------------------
+# SFTP Step (step.sftp)
+# ---------------------------------------------------------------------------
+SftpStepDefinition:
+  operation:   { type: String,  description: "upload — local to remote. download — remote to local." }
+  local_path:  { type: String,  description: "Local filesystem path. Supports ${var}." }
+  remote_path: { type: String,  description: "Remote server path. Supports ${var}." }
+  create_dirs: { type: Boolean, description: "If true, creates missing remote directories before upload." }
+  overwrite:   { type: Boolean, description: "If true, overwrites existing remote file. If false, skips if file exists." }
+
+# ---------------------------------------------------------------------------
+# Email Step (step.email)
+# ---------------------------------------------------------------------------
+EmailStepDefinition:
+  to:                { type: "String | List", description: "Recipient address(es). Comma-separated string or YAML list." }
+  cc:                { type: "String | List", description: "CC recipient(s)." }
+  bcc:               { type: "String | List", description: "BCC recipient(s)." }
+  from:              { type: String,  description: "Sender address. Overrides node-level defaults.from." }
+  subject:           { type: String,  description: "Email subject line. Supports ${var}. Default: 'CLI Automation Notification'." }
+  subject_prefix:    { type: String,  description: "Prefix prepended to subject. Overrides node default." }
+  body:              { type: String,  description: "Email body text. Supports ${var}." }
+  body_file:         { type: String,  description: "Path to file whose contents become the body. Alternative to inline body." }
+  body_content_type: { type: String,  description: "text/plain (default) or text/html." }
+  attachments:       { type: "List<Map>", description: "File attachments. Each entry: path (file path), optional file_name, optional content_type." }
+  wait_for_reply:    { type: Boolean, description: "If true, polls the IMAP inbox for a reply (approval gate). Default: false." }
+  poll_interval_sec: { type: Integer, description: "Seconds between IMAP polls when wait_for_reply: true. Default: 20." }
+  timeout_sec:       { type: Integer, description: "Maximum seconds to wait for a reply. Default: 300." }
+
+# ---------------------------------------------------------------------------
+# on_failure values
+# ---------------------------------------------------------------------------
+on_failure_values:
+  stop:     "Default. Halts execution of remaining steps in the current phase. Post-failure phases (then:) may still run."
+  continue: "Ignores the failure and proceeds to the next step. Step is still recorded as failed in execution JSON."
+  warning:  "Same as continue — execution proceeds, but failure is tracked so the phase is marked as having failures. Useful on loop steps."
+  run:      "Executes a named handler step before stopping. Handler's own on_failure is also honored. Syntax: run: <stepId>"
+
+# ---------------------------------------------------------------------------
+# Variable Interpolation
+# ---------------------------------------------------------------------------
+interpolation:
+  "${varName}":       "Resolved from runtime context variables (globals.vars + registered outputs + phase vars)."
+  "${ENV.NAME}":      "Resolved from OS environment variable NAME. Never stored in logs."
+  "${SECRET.key}":    "Resolved from globals.secrets. Masked as *** in all log output when redacted: true."
+  "${vars.a.b[0].c}": "Deep dot-path navigation into nested Maps and Lists stored as variables."
+  _notes:
+    - "Multiple placeholders in a single string are all resolved in one pass."
+    - "interpolateObject() recursively interpolates Maps, Lists, and nested structures."
+    - "Dot-path resolution supports suffix matching: if 'part' is not found, a key ending with '.part' is tried (unique match only)."
+
+# ---------------------------------------------------------------------------
+# Condition Operators (when / skip_when / expr)
+# ---------------------------------------------------------------------------
+condition_operators:
+  "==":             "Equality comparison"
+  "!=":             "Inequality comparison"
+  "&&":             "Logical AND"
+  "||":             "Logical OR"
+  "startsWith":     "String prefix check"
+  "notStartsWith":  "Negated string prefix check"
+  _notes:
+    - "Both ${varName} and bare varName are supported as operands."
+
+# ---------------------------------------------------------------------------
+# Retry Logic
+# ---------------------------------------------------------------------------
+retry:
+  retries:          "Number of retry attempts after first failure."
+  retry_delay_sec:  "Seconds to wait between retries."
+  retry_on:
+    - timeout:        "Command timed out"
+    - non_zero_exit:  "Exit code != 0"
+    - prompt_timeout: "Interactive prompt not seen in time"
+    - regex_miss:     "Validation criteria not matched"
+
+# ---------------------------------------------------------------------------
+# Execution JSON Output
+# ---------------------------------------------------------------------------
+execution_json:
+  metadata:
+    nodeName:          "Node name + node_details if present"
+    execution_summary:
+      overall_status:     "SUCCESS | FAILED"
+      total_commands:     "Total step count"
+      successful_commands: "Steps that passed"
+      failed_commands:    "Steps that failed"
+      validation_success: "Steps with validation success"
+      validation_failed:  "Steps with validation failure"
+      validation_warning: "Steps with validation warning"
+      validation_skipped: "Steps with no validation or skipped"
+      startDateAndTime:   "ISO timestamp"
+      endDateAndTime:     "ISO timestamp"
+      phase_summary:      "Per-phase breakdown"
+  data:
+    "<command>":
+      phase:                  "Phase name"
+      target:                 "Node ID"
+      command:                "Command string"
+      description:            "Step description"
+      output:                 "Command output"
+      startDateAndTime:       "ISO timestamp"
+      endDateAndTime:         "ISO timestamp"
+      success:                "true | false"
+      failure:                "Failure message or empty"
+      validate:               "true | false"
+      validation_status:      "success | failed | warning | skipped"
+      validation_criteria:    "Description from validation block"
+      validation_conclusion:  "Conclusion message"
+
+# ---------------------------------------------------------------------------
+# Plugin System (SPI)
+# ---------------------------------------------------------------------------
+plugins:
+  ProtocolPlugin:
+    methods:
+      getId:     "Returns plugin identifier string"
+      supports:  "Returns true if plugin handles the given nodeType"
+      execute:   "Executes the step — returns ProtocolExecutionResult"
+  ValidationPlugin:
+    methods:
+      getId:     "Returns plugin identifier string"
+      execute:   "Runs validation function with args — returns Map (result, status, message)"
+  builtin_plugins:
+    - { id: ssh,              class: RemoteCommandExecutor, node_type: remote }
+    - { id: rest-plugin,      class: RestProtocolPlugin,    node_type: rest }
+    - { id: sftp-plugin,      class: SftpProtocolPlugin,    node_type: sftp }
+    - { id: email-plugin,     class: EmailProtocolPlugin,   node_type: email }
+    - { id: simple-script,    class: SimpleScriptValidationPlugin, type: validation }
+  external_plugins:
+    description: "Drop JARs into the directory specified by CLI_AUTOMATION_PLUGIN_DIR environment variable. Loaded via ServiceLoader at runtime."

@@ -27,6 +27,7 @@ def parse_ciq(
 
     all_headers: list[str] = []
     all_rows: list[dict[str, str]] = []
+    per_sheet: dict[str, dict] = {}  # sheet_name -> {headers, rows, sample_rows}
     errors: list[str] = []
 
     for sheet_name in sheets_to_process:
@@ -54,13 +55,21 @@ def parse_ciq(
                 all_headers.append(h)
 
         # Parse data rows
+        sheet_rows: list[dict[str, str]] = []
         for row in rows_iter:
             row_dict = {}
             for idx, header in col_indices:
                 val = row[idx] if idx < len(row) else None
                 row_dict[header] = str(val).strip() if val is not None else ""
             if any(v for v in row_dict.values()):  # skip empty rows
+                sheet_rows.append(row_dict)
                 all_rows.append(row_dict)
+
+        per_sheet[sheet_name] = {
+            "headers": sheet_headers,
+            "rows": sheet_rows,
+            "sample_rows": sheet_rows[:5],  # first 5 rows as samples
+        }
 
     wb.close()
 
@@ -74,6 +83,7 @@ def parse_ciq(
         "headers": all_headers,
         "rows": all_rows,
         "sheet_names": all_sheet_names,
+        "per_sheet": per_sheet,
         "errors": errors,
     }
 
