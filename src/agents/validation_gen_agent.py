@@ -59,6 +59,77 @@ def _validate_yaml(yaml_text: str) -> str:
     return yaml_text
 
 
+def _strip_bad_workbook_rules(yaml_text: str, ciq_path: str) -> str:
+    """Auto-remove workbook_rules that reference non-existent columns (e.g., set with bad partitionBy)."""
+    import openpyxl
+    from ruamel.yaml import YAML
+    from io import StringIO
+
+    yaml = YAML()
+    try:
+        rules = yaml.load(StringIO(yaml_text))
+    except Exception:
+        return yaml_text
+
+    if not isinstance(rules, dict):
+        return yaml_text
+
+    # Build column lookup
+    try:
+        wb = openpyxl.load_workbook(ciq_path, read_only=True, data_only=True)
+    except Exception:
+        return yaml_text
+
+    ciq_cols_lower: dict[str, set[str]] = {}
+    for sn in wb.sheetnames:
+        ws = wb[sn]
+        headers = set()
+        for cell in next(ws.iter_rows(min_row=1, max_row=1), []):
+            if cell.value:
+                headers.add(str(cell.value).strip().lower())
+        ciq_cols_lower[sn.lower()] = headers
+    wb.close()
+
+    wb_rules = rules.get("workbook_rules", [])
+    if not wb_rules or not isinstance(wb_rules, list):
+        return yaml_text
+
+    cleaned = []
+    removed = False
+    for rule in wb_rules:
+        if not isinstance(rule, dict):
+            cleaned.append(rule)
+            continue
+        # Check set rules
+        if "set" in rule:
+            set_def = rule["set"]
+            if isinstance(set_def, dict):
+                to_def = set_def.get("to", {})
+                if isinstance(to_def, dict):
+                    to_sheet = str(to_def.get("sheet", "")).lower()
+                    to_cols = ciq_cols_lower.get(to_sheet, set())
+                    for pcol in (set_def.get("from", {}).get("partitionBy", []) or []):
+                        if pcol.lower() not in to_cols:
+                            removed = True
+                            break
+                    else:
+                        cleaned.append(rule)
+                        continue
+                    continue  # skip this rule
+        cleaned.append(rule)
+
+    if removed:
+        rules["workbook_rules"] = cleaned
+        buf = StringIO()
+        yaml_out = YAML()
+        yaml_out.default_flow_style = False
+        yaml_out.dump(rules, buf)
+        logger.info("Auto-stripped invalid set workbook_rules")
+        return buf.getvalue()
+
+    return yaml_text
+
+
 def _validate_against_ciq(yaml_text: str, ciq_path: str) -> list[str]:
     """Check that sheet/column names in validation rules match the actual CIQ.
 
@@ -188,6 +259,32 @@ def _validate_against_ciq(yaml_text: str, ciq_path: str) -> list[str]:
         wb2.close()
     except Exception:
         pass
+
+    # Validate row rule structure
+    # Validate workbook_rules — check set rules have valid partition columns
+    wb_rules = rules.get("workbook_rules", []) or []
+    for wb_rule in wb_rules:
+        if not isinstance(wb_rule, dict):
+            continue
+        if "set" in wb_rule:
+            set_def = wb_rule["set"]
+            if isinstance(set_def, dict):
+                from_def = set_def.get("from", {})
+                to_def = set_def.get("to", {})
+                if isinstance(from_def, dict) and isinstance(to_def, dict):
+                    for part_col in (from_def.get("partitionBy", []) or []):
+                        from_sheet = from_def.get("sheet", "")
+                        to_sheet = to_def.get("sheet", "")
+                        # Check partition column exists in target sheet
+                        to_sheet_lower = to_sheet.lower() if to_sheet else ""
+                        to_cols = ciq_columns_lower.get(to_sheet_lower, {})
+                        if part_col.lower() not in to_cols:
+                            mismatches.append(
+                                f"workbook_rules 'set' rule: partitionBy column '{part_col}' "
+                                f"does not exist in target sheet '{to_sheet}'. "
+                                f"Available columns: {list(to_cols.values())}. "
+                                f"Remove this set rule or use a simple subset rule instead."
+                            )
 
     # Validate row rule structure
     VALID_RULE_KEYS = {"unique_key", "one_of", "all_or_none", "require", "forbid",
@@ -465,10 +562,12 @@ report_output:
             "Used for node grouping. Can have multiple NIAM IDs per row.\n"
             "- Data sheets: UC-specific configuration data (the actual changes to apply).\n\n"
 
-            "FIXED WORKBOOK_RULES (always include):\n"
-            "- Index.Node/NodeGroup MUST be a subset of IP.Node/NodeGroup\n"
-            "- If data sheets have a grouping column, add subset/superset linking them to Index\n"
-            "- Add any user-specified cross-sheet rules from constraints\n\n"
+            "WORKBOOK_RULES:\n"
+            "- ONLY use 'subset' rules for cross-sheet validation — they are simple and reliable\n"
+            "- Example: Index grouping column must be a subset of IP grouping column\n"
+            "- DO NOT use 'set' rules with partitionBy unless BOTH sheets have the partition column\n"
+            "- DO NOT add set/bidirectional rules — they are complex and error-prone\n"
+            "- Keep workbook_rules minimal — only add what's clearly needed\n\n"
 
             "FIXED COLUMN RULES (always include for standard columns):\n"
             "- EMAIL columns: type: email, multi: true, consolidate: true, consolidate_separator: \";\", "
@@ -569,8 +668,12 @@ report_output:
                 output_data={"validation_rules_yaml": yaml_content},
             )
 
-        # Validate column/sheet names against actual CIQ
+        # Auto-fix: strip problematic workbook rules before validation
         ciq_path = input_data.get("ciq_file_path", "")
+        if ciq_path and Path(ciq_path).exists():
+            yaml_content = _strip_bad_workbook_rules(yaml_content, ciq_path)
+
+        # Validate column/sheet names against actual CIQ
         if ciq_path and Path(ciq_path).exists():
             mismatches = _validate_against_ciq(yaml_content, ciq_path)
             if mismatches:

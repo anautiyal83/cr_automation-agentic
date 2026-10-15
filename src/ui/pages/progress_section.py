@@ -248,7 +248,7 @@ class ProgressSection:
                     6: f"{uc_name}.yaml",
                     7: f"{uc_name}_mop-generation-report.html",
                     8: f"{uc_name}_simulator-overview.html",
-                    9: f"{uc_name}_exec-test-results.txt",
+                    9: f"{uc_name}_exec-test-report.html",
                 }
                 fname = artifact_map.get(step, "")
                 if fname:

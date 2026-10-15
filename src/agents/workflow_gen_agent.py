@@ -174,9 +174,84 @@ class WorkflowGenAgent:
 
             f"=== COMMAND OUTPUT SAMPLES (expected CLI responses) ===\n{cmd_summary}\n\n"
 
-            f"=== SCHEMA REFERENCE ===\n{schema[:10000]}\n\n"
-
             f"{few_shot_text}{retry_info}\n\n"
+
+            "=== WORKING EXAMPLE (follow this EXACT structure) ===\n\n"
+            "version: '1.2'\n"
+            "name: example-workflow\n"
+            "globals:\n"
+            "  vars:\n"
+            "    ACTIVITY_ID: '1029_TAC_LOADING'\n"
+            "    NODE_TYPE: EIR\n"
+            "    ROLLBACK_REQUIRED: 'false'\n"
+            "  secrets:\n"
+            "    node_password:\n"
+            "      value: '${ENV.NODE_PASSWORD}'\n"
+            "      redacted: true\n"
+            "  defaults:\n"
+            "    timeout_sec: 120\n"
+            "    on_failure: stop\n"
+            "nodes:\n"
+            "  target_node:\n"
+            "    type: remote\n"
+            "    plugin: ssh\n"
+            "    prompt_regex: '(?m)[#$]\\s*$'\n"
+            "    ssh:\n"
+            "      host: '${node_ip}'\n"
+            "      user: '${node_user}'\n"
+            "      auth:\n"
+            "        password: '${SECRET.node_password}'\n"
+            "      strict_host_key_checking: false\n"
+            "phases:\n"
+            "  preNodeHealthCheck:\n"
+            "    name: Pre-Node Health Check\n"
+            "    on_failure: stop\n"
+            "    steps:\n"
+            "      - node: target_node\n"
+            "        command_description: Verify connectivity\n"
+            "        send: hostname\n"
+            "        on_failure: stop\n"
+            "        register:\n"
+            "          - regex: '(?<HOSTNAME>\\S+)'\n"
+            "        validation:\n"
+            "          enabled: true\n"
+            "          description: Verify SSH connectivity\n"
+            "          success:\n"
+            "            criteria:\n"
+            "              expr: '${HOSTNAME != \"\"}'\n"
+            "            message: Connected to ${HOSTNAME}\n"
+            "          failure:\n"
+            "            message: Failed to connect\n"
+            "      - node: target_node\n"
+            "        command_description: Check alarms\n"
+            "        send: 'alarm_cli --list critical'\n"
+            "        on_failure: continue\n"
+            "        register:\n"
+            "          - regex: '(?<ALARM_COUNT>\\d+) alarm'\n"
+            "  backup:\n"
+            "    name: Configuration Backup\n"
+            "    steps:\n"
+            "      - node: target_node\n"
+            "        command_description: Take config backup\n"
+            "        send: 'cp /config/running.xml /backup/'\n"
+            "        on_failure: stop\n"
+            "  activity_configuration:\n"
+            "    name: Activity Configuration\n"
+            "    steps:\n"
+            "      - node: target_node\n"
+            "        command_description: Apply configuration\n"
+            "        send: 'config apply ${ACTIVITY_ID}'\n"
+            "        on_failure: stop\n"
+            "        register:\n"
+            "          - regex: '(?<APPLY_RESULT>SUCCESS|FAILED)'\n"
+            "        validation:\n"
+            "          enabled: true\n"
+            "          success:\n"
+            "            criteria:\n"
+            "              expr: '${APPLY_RESULT == \"SUCCESS\"}'\n"
+            "            message: Configuration applied successfully\n"
+            "          failure:\n"
+            "            message: Configuration apply failed\n\n"
 
             "=== WORKFLOW GENERATION INSTRUCTIONS ===\n\n"
 
@@ -225,40 +300,63 @@ class WorkflowGenAgent:
             "- If CIQ has only node names → assume NIAM proxy\n"
             "- Always add a repo_server node for backup/file transfer operations\n\n"
 
-            "=== STEP STRUCTURE (for each step) ===\n\n"
-            "Every step MUST have:\n"
-            "- node: <target node name>\n"
-            "- command_description: human-readable description of what this step does\n"
-            "- send: the CLI command to execute (use ${var} for runtime values)\n"
-            "- on_failure: stop|continue|warning\n"
-            "- register: capture output values with named regex groups\n"
-            "- validation: success/failure criteria with expr or regex\n\n"
+            "=== EXACT STEP STRUCTURE (Java model) ===\n\n"
+
+            "CORRECT step format (follow EXACTLY):\n"
+            "  - node: target_node\n"
+            "    command_description: Check connectivity\n"
+            "    send: hostname\n"
+            "    on_failure: stop\n"
+            "    register:\n"
+            "      - regex: '(?<HOSTNAME>\\S+)'\n"
+            "    validation:\n"
+            "      enabled: true\n"
+            "      description: Verify connectivity\n"
+            "      success:\n"
+            "        criteria:\n"
+            "          expr: '${HOSTNAME != \"\"}'\n"
+            "        message: Connected successfully\n"
+            "      failure:\n"
+            "        message: Failed to connect\n\n"
+
+            "REGISTER: must be a LIST of items with regex or name/value:\n"
+            "  register:\n"
+            "    - regex: '(?<VAR_NAME>pattern)'\n"
+            "    - name: DERIVED\n"
+            "      value: '${SOME_VAR}'\n"
+            "WRONG register formats: register: {name: regex} or register: name: regex\n\n"
+
+            "VALIDATION: must be a single OBJECT (not a list):\n"
+            "  validation:\n"
+            "    enabled: true\n"
+            "    success:\n"
+            "      criteria:\n"
+            "        expr: '${VAR != \"\"}'\n"
+            "      message: OK\n"
+            "    failure:\n"
+            "      message: Failed\n"
+            "WRONG validation formats: validation: [list], success_expr, success_regex\n\n"
+
+            "FORBIDDEN step fields: id, step_id, step_name — use command_description instead\n\n"
 
             "=== VARIABLE NAMING ===\n\n"
             "Use ${varName} syntax. At runtime, the framework provides:\n"
             "- CIQ JSON fields: ${node}, ${niamID}, ${crGroup}, ${nodeGroup}, ${email}\n"
-            "- configData fields: ${configData_fieldName} for each field in configData\n"
-            "- Registered values: ${REGISTERED_VAR_NAME} from previous step register blocks\n"
-            "- Globals: ${ACTIVITY_ID}, ${NODE_TYPE}, ${ROLLBACK_REQUIRED}, etc.\n"
+            "- configData fields: each configData field name directly, e.g. ${Test IMSI}\n"
+            "- Registered values: ${VAR_NAME} from previous step register blocks\n"
+            "- Globals: ${activity_id}, ${node_type}, etc.\n"
             "- Secrets: ${SECRET.key_name}\n"
             "- Environment: ${ENV.VAR_NAME}\n\n"
 
             "=== CRITICAL ===\n"
             "- Generate AT LEAST 15-20 steps total across all phases\n"
-            "- Map EVERY MOP procedure step — do not skip or summarize steps\n"
-            "- Include register blocks to capture command output for validation\n"
-            "- Include validation blocks with success/failure criteria\n"
-            "- Use for_each when iterating over multiple configData items\n"
-            "- phases MUST be a MAP (key: value), NOT a list — example:\n"
-            "    phases:\n"
-            "      preNodeHealthCheck:\n"
-            "        name: \"Pre-Node Health Check\"\n"
-            "        steps:\n"
-            "          - node: target_node\n"
-            "            command_description: \"Check connectivity\"\n"
-            "            send: \"hostname\"\n"
+            "- Map EVERY MOP procedure step — do not skip or summarize\n"
+            "- Use register with (?<NAMED_GROUP>...) regex for every step that captures output\n"
+            "- Use validation: { enabled: true, success: { criteria: { expr: ... } } } format\n"
+            "- phases MUST be a MAP (key: value), NOT a list\n"
+            "- Steps MUST NOT have 'id' field — use command_description instead\n"
             "- Use 2-space indentation consistently, NO tabs\n"
-            "- Quote strings containing special chars: colons, braces, brackets, #\n"
+            "- Quote strings with special chars: colons, braces, brackets, #\n"
             "- Multi-line send commands use YAML literal block: send: |\n"
             "- Return ONLY valid YAML, no markdown fences"
         )
@@ -273,6 +371,13 @@ class WorkflowGenAgent:
 
         response = await call_llm(prompt, system_prompt=system, model=model)
         yaml_content = _extract_yaml(response)
+
+        # Save raw output for debugging
+        try:
+            raw_path = Path(input_data.get("run_dir", ".")) / f"{uc_name}_workflow_raw.yaml"
+            raw_path.write_text(yaml_content, encoding="utf-8")
+        except Exception:
+            pass
 
         # Auto-fix common YAML issues
         yaml_content = _fix_workflow_yaml(yaml_content)
@@ -325,69 +430,29 @@ class WorkflowGenAgent:
 
 def _fix_workflow_yaml(yaml_text: str) -> str:
     """Auto-fix common YAML issues in LLM-generated workflows."""
-    # Remove any leading BOM or invisible chars
+    # Remove BOM
     yaml_text = yaml_text.strip().lstrip("\ufeff")
 
     # Fix tabs → 2 spaces
     yaml_text = yaml_text.replace("\t", "  ")
 
-    # Fix trailing whitespace on lines (can cause parse issues)
+    # Fix trailing whitespace
     yaml_text = "\n".join(line.rstrip() for line in yaml_text.split("\n"))
 
-    # Fix common issue: `phases:` as a list (- name:) instead of a map
-    # The LLM sometimes generates:
-    #   phases:
-    #     - name: "Phase 1"
-    #       steps: [...]
-    # But we need:
-    #   phases:
-    #     phase_1:
-    #       name: "Phase 1"
-    #       steps: [...]
-    lines = yaml_text.split("\n")
-    fixed_lines = []
-    in_phases = False
-    phase_indent = 0
-    phase_counter = 0
+    # Fix invalid escape sequences in double-quoted strings
+    # YAML double quotes only allow specific escapes (\n \t \\ \" etc.)
+    # LLM often uses regex escapes like \$ \( \) \| which are invalid in YAML double quotes
+    # Fix: convert such strings to single-quoted
+    def _fix_double_quoted_regex(m):
+        content = m.group(1)
+        if any(f"\\{c}" in content for c in "$(){}[].|+*?^"):
+            content = content.replace("'", "''")
+            return f"'{content}'"
+        return m.group(0)
 
-    for i, line in enumerate(lines):
-        stripped = line.lstrip()
+    yaml_text = re.sub(r'"((?:[^"\\]|\\.)*)"', _fix_double_quoted_regex, yaml_text)
 
-        # Detect phases: section
-        if stripped == "phases:" or stripped.startswith("phases:"):
-            in_phases = True
-            phase_indent = len(line) - len(stripped)
-            fixed_lines.append(line)
-            continue
-
-        # If in phases section and we hit a list item at the right indent
-        if in_phases and stripped.startswith("- name:"):
-            item_indent = len(line) - len(stripped)
-            if item_indent > phase_indent:
-                # Convert list item to map key
-                phase_counter += 1
-                phase_name_match = re.search(r'-\s*name:\s*["\']?([^"\']+)', stripped)
-                if phase_name_match:
-                    safe_name = re.sub(r'[^a-zA-Z0-9_]', '_', phase_name_match.group(1).strip()).lower()[:30]
-                else:
-                    safe_name = f"phase_{phase_counter}"
-                # Replace "- name: X" with "phase_key:\n  name: X"
-                indent = " " * item_indent
-                name_value = stripped[stripped.index("name:"):]
-                fixed_lines.append(f"{indent}{safe_name}:")
-                fixed_lines.append(f"{indent}  {name_value}")
-                continue
-
-        # If in phases and we hit a non-phases top-level key, stop converting
-        if in_phases and stripped and not stripped.startswith("#") and not stripped.startswith("-"):
-            line_indent = len(line) - len(stripped)
-            if line_indent <= phase_indent and ":" in stripped:
-                in_phases = False
-
-        # Fix list continuation lines that lost their "- " prefix
-        fixed_lines.append(line)
-
-    return "\n".join(fixed_lines)
+    return yaml_text
 
 
 def _validate_workflow_structure(yaml_text: str) -> list[str]:
@@ -411,14 +476,72 @@ def _validate_workflow_structure(yaml_text: str) -> list[str]:
     elif isinstance(phases, list):
         errors.append("'phases' must be a map (key: value), not a list. Use phase_name: { steps: [...] }")
 
-    # Count total steps
+    # Count total steps and validate step fields
+    VALID_STEP_FIELDS = {
+        "node", "command_description", "send", "on_failure", "timeout_sec",
+        "register", "validation", "retries", "retry_delay_sec", "when",
+        "skip_when", "expect_reply", "prompt_regex", "for_each", "enabled",
+        "interaction_timeout_sec", "name", "description", "steps",
+    }
+    INVALID_STEP_FIELDS = {"id", "step_id", "step_name"}
+
     total_steps = 0
+    step_errors_found = 0
     if isinstance(phases, dict):
         for pname, pdef in phases.items():
-            if isinstance(pdef, dict):
-                steps = pdef.get("steps", [])
-                if isinstance(steps, list):
-                    total_steps += len(steps)
+            if not isinstance(pdef, dict):
+                continue
+            steps = pdef.get("steps", [])
+            if not isinstance(steps, list):
+                continue
+            total_steps += len(steps)
+
+            for i, step in enumerate(steps):
+                if not isinstance(step, dict):
+                    continue
+
+                # Check for invalid fields
+                for bad in INVALID_STEP_FIELDS:
+                    if bad in step:
+                        errors.append(
+                            f"Phase '{pname}', step {i+1}: field '{bad}' is NOT valid. "
+                            f"Remove it. Use 'command_description' instead."
+                        )
+                        step_errors_found += 1
+
+                # Check register format
+                reg = step.get("register")
+                if reg is not None and not isinstance(reg, list):
+                    errors.append(
+                        f"Phase '{pname}', step {i+1}: 'register' must be a LIST of items "
+                        f"[{{regex: '(?<NAME>...)'}}], not {type(reg).__name__}. "
+                        f"Got: {str(reg)[:80]}"
+                    )
+                    step_errors_found += 1
+
+                # Check validation format
+                val = step.get("validation")
+                if val is not None and isinstance(val, list):
+                    errors.append(
+                        f"Phase '{pname}', step {i+1}: 'validation' must be a single OBJECT "
+                        f"{{enabled: true, success: {{criteria: {{expr: ...}}}}}}, not a list."
+                    )
+                    step_errors_found += 1
+                elif isinstance(val, dict):
+                    # Check for wrong field names
+                    bad_val_keys = {"success_expr", "success_regex", "failure_message",
+                                    "fail_message", "success_message"}
+                    found_bad = bad_val_keys & set(val.keys())
+                    if found_bad:
+                        errors.append(
+                            f"Phase '{pname}', step {i+1}: validation has invalid keys {found_bad}. "
+                            f"Use: validation: {{enabled: true, success: {{criteria: {{expr: '...'}}, message: '...'}}, failure: {{message: '...'}}}}"
+                        )
+                        step_errors_found += 1
+
+                if step_errors_found >= 3:
+                    errors.append("(truncated — fix the above issues first)")
+                    return errors
 
     if total_steps < 5:
         errors.append(

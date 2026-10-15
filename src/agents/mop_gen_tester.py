@@ -249,16 +249,30 @@ class MopGenTester:
               <td>{html_mod.escape(files) if files else error}</td>
             </tr>"""
 
-        # Build MOP file cards
+        # Build MOP file cards with View/Download links
+        # Serve each MOP file via NiceGUI for browser access
         mop_cards = ""
         for f in mop_files:
             size_kb = f.stat().st_size / 1024
+            try:
+                serve_url = app.add_media_file(local_file=str(f))
+            except Exception:
+                serve_url = ""
+            view_btn = (
+                f'<a href="{serve_url}" target="_blank" class="btn btn-view">View</a>'
+                if serve_url else ''
+            )
+            download_btn = (
+                f'<a href="{serve_url}" download="{html_mod.escape(f.name)}" class="btn btn-download">Download</a>'
+                if serve_url else ''
+            )
             mop_cards += (
                 f'<div class="file-card">'
                 f'<span class="file-icon">&#128196;</span>'
                 f'<span class="file-name">{html_mod.escape(f.name)}</span>'
                 f'<span class="file-size">{size_kb:.1f} KB</span>'
                 f'<span class="file-path">{html_mod.escape(str(f.parent.name))}/</span>'
+                f'<span class="file-actions">{view_btn} {download_btn}</span>'
                 f'</div>'
             )
         if not mop_cards:
@@ -302,6 +316,13 @@ td {{ padding: 8px 12px; border-bottom: 1px solid #eef0f3; }}
 .file-name {{ font-weight: 600; font-size: 13px; flex: 1; }}
 .file-size {{ color: #888; font-size: 12px; }}
 .file-path {{ color: #aaa; font-size: 11px; }}
+.file-actions {{ display: flex; gap: 6px; }}
+.btn {{ display: inline-block; padding: 4px 12px; border-radius: 4px; font-size: 11px;
+  font-weight: 600; text-decoration: none; text-transform: uppercase; letter-spacing: 0.5px; }}
+.btn-view {{ background: #1a3a5c; color: #fff; }}
+.btn-view:hover {{ background: #2c5282; }}
+.btn-download {{ background: #27ae60; color: #fff; }}
+.btn-download:hover {{ background: #219a52; }}
 .footer {{ padding: 12px 30px; font-size: 11px; color: #999; text-align: center; margin-top: 12px; }}
 </style></head>
 <body>
