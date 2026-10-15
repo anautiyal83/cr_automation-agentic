@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class ReportGenerator:
-    step_number = 9
+    step_number = 10
     step_name = "Report Generator"
 
     async def execute(

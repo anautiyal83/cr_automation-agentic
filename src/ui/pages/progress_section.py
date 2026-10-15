@@ -25,8 +25,10 @@ STATUS_CONFIG = {
 STEP_ICONS = {
     1: "file_open", 2: "analytics", 3: "fact_check",
     4: "data_object", 5: "science", 6: "account_tree",
-    7: "code", 8: "play_circle", 9: "summarize",
+    7: "description", 8: "code", 9: "play_circle", 10: "summarize",
 }
+
+TOTAL_STEPS = 10
 
 
 class ProgressSection:
@@ -79,14 +81,34 @@ class ProgressSection:
                 .props("color=deep-purple-6 stripe animate rounded size=8px")
             self.progress_bar.set_visibility(False)
 
-            # Step tracker — horizontal timeline
-            with ui.row().classes("w-full gap-0 overflow-x-auto py-2"):
-                for i in range(1, 10):
-                    self._step_widget(i)
-                    if i < 9:
-                        # Connector line
-                        connector = ui.element("div").classes("cr-step-connector")
-                        self.step_widgets[i]["connector"] = connector
+            # Step tracker — two-row timeline with arrow connectors
+            ROW1_STEPS = range(1, 6)   # Steps 1-5
+            ROW2_STEPS = range(6, 11)  # Steps 6-10
+
+            with ui.column().classes("w-full gap-0 py-2"):
+                # Row 1: Steps 1-5
+                with ui.row().classes("w-full gap-0 justify-center"):
+                    for i in ROW1_STEPS:
+                        self._step_widget(i)
+                        if i < 5:
+                            connector = ui.element("div").classes("cr-step-connector")
+                            self.step_widgets[i]["connector"] = connector
+
+                # Row connector arrow (↓)
+                with ui.row().classes("w-full justify-center cr-step-row-connector"):
+                    ui.html(
+                        '<svg viewBox="0 0 20 20" fill="currentColor">'
+                        '<path d="M10 2 L10 14 M5 10 L10 16 L15 10"/>'
+                        '</svg>'
+                    )
+
+                # Row 2: Steps 6-10
+                with ui.row().classes("w-full gap-0 justify-center"):
+                    for i in ROW2_STEPS:
+                        self._step_widget(i)
+                        if i < 10:
+                            connector = ui.element("div").classes("cr-step-connector")
+                            self.step_widgets[i]["connector"] = connector
 
             # Error / retry detail area
             self.detail_container = ui.column().classes("w-full")
@@ -131,7 +153,7 @@ class ProgressSection:
 
     def _step_widget(self, step_num: int):
         with ui.column().classes("items-center gap-1 flex-shrink-0") \
-                .style("min-width: 80px") as col:
+                .style("min-width: 70px; max-width: 90px") as col:
             # Circle icon
             icon_container = ui.element("div").classes("cr-step-circle")
             with icon_container:
@@ -141,9 +163,9 @@ class ProgressSection:
 
             # Step label
             label = ui.label(f"Step {step_num}").classes("text-[10px] cr-text-dim font-semibold")
-            name = ui.label(STEP_NAMES.get(step_num, "")[:12]) \
-                .classes("text-[10px] cr-text-dim text-center leading-tight") \
-                .style("max-width: 80px")
+            name = ui.label(STEP_NAMES.get(step_num, "")) \
+                .classes("text-[9px] cr-text-dim text-center leading-tight") \
+                .style("max-width: 90px; word-wrap: break-word")
             status_label = ui.label("pending") \
                 .classes("text-[10px] cr-text-dim")
 
@@ -195,8 +217,8 @@ class ProgressSection:
                 self.status_icon.name = "sync"
                 self.status_icon.classes(replace="cr-text-accent cr-spin")
                 self.status_label.text = f"Pipeline Running — {uc_name}"
-                self.status_detail.text = f"Step {step}/9: {STEP_NAMES.get(step, '')}"
-                self.progress_bar.value = (step - 1) / 9 if step > 0 else 0
+                self.status_detail.text = f"Step {step}/{TOTAL_STEPS}: {STEP_NAMES.get(step, '')}"
+                self.progress_bar.value = (step - 1) / TOTAL_STEPS if step > 0 else 0
                 self.progress_bar.props("color=deep-purple-6 stripe animate")
                 self.banner.style(replace=(
                     "background: rgba(108,99,255,0.08); border: 1px solid rgba(108,99,255,0.3)"
@@ -206,8 +228,8 @@ class ProgressSection:
                 self.status_icon.name = "rate_review"
                 self.status_icon.classes(replace="cr-text-warning")
                 self.status_label.text = f"Milestone Review — {uc_name}"
-                self.status_detail.text = f"Step {step}/9 completed — awaiting review"
-                self.progress_bar.value = step / 9
+                self.status_detail.text = f"Step {step}/{TOTAL_STEPS} completed — awaiting review"
+                self.progress_bar.value = step / TOTAL_STEPS
                 self.progress_bar.props("color=deep-purple-6")
                 self.progress_bar.props(remove="animate")
                 self.banner.style(replace=(
@@ -224,8 +246,9 @@ class ProgressSection:
                     4: f"{uc_name}_json-output.yaml",
                     5: "qa/qa-execution-report.html",
                     6: f"{uc_name}.yaml",
-                    7: f"{uc_name}_simulator-config.yaml",
-                    8: f"{uc_name}_exec-test-results.txt",
+                    7: f"{uc_name}_mop-generation-report.html",
+                    8: f"{uc_name}_simulator-overview.html",
+                    9: f"{uc_name}_exec-test-results.txt",
                 }
                 fname = artifact_map.get(step, "")
                 if fname:
@@ -253,8 +276,8 @@ class ProgressSection:
                 self.status_icon.name = "help_outline"
                 self.status_icon.classes(replace="cr-text-warning")
                 self.status_label.text = f"Waiting for Input — {uc_name}"
-                self.status_detail.text = f"Step {step}/9 needs human clarification"
-                self.progress_bar.value = (step - 1) / 9
+                self.status_detail.text = f"Step {step}/{TOTAL_STEPS} needs human clarification"
+                self.progress_bar.value = (step - 1) / TOTAL_STEPS
                 self.progress_bar.props("color=warning")
                 self.banner.style(replace=(
                     "background: rgba(251,191,36,0.08); border: 1px solid rgba(251,191,36,0.3)"
@@ -279,7 +302,7 @@ class ProgressSection:
             "background: rgba(108,99,255,0.08); border: 1px solid rgba(108,99,255,0.3)"
         ))
         # Reset all steps
-        for i in range(1, 10):
+        for i in range(1, TOTAL_STEPS + 1):
             self._update_step_visual(i, "pending")
         event_bus.subscribe(self._on_event, run_id)
 
@@ -303,13 +326,13 @@ class ProgressSection:
             self.status_icon.name = "sync"
             self.status_icon.classes(replace="cr-text-accent cr-spin")
             self.status_label.text = "Pipeline Running"
-            self.status_detail.text = f"Step {event.step_number}/9: {STEP_NAMES.get(event.step_number, '')}"
+            self.status_detail.text = f"Step {event.step_number}/{TOTAL_STEPS}: {STEP_NAMES.get(event.step_number, '')}"
             self.progress_bar.props(remove="indeterminate")
-            self.progress_bar.value = (event.step_number - 1) / 9
+            self.progress_bar.value = (event.step_number - 1) / TOTAL_STEPS
             self.milestone_row.set_visibility(False)
         elif event.event_type == "step_completed":
             self._update_step_visual(event.step_number, event.payload.get("status", "passed"))
-            self.progress_bar.value = event.step_number / 9
+            self.progress_bar.value = event.step_number / TOTAL_STEPS
         elif event.event_type == "step_failed":
             self._update_step_visual(event.step_number, "failed")
         elif event.event_type == "retry_started":
@@ -327,9 +350,7 @@ class ProgressSection:
                 self._update_step_visual(event.step_number, "failed")
                 self.status_icon.name = "error_outline"
                 self.status_icon.classes(replace="cr-text-error")
-                if event.step_number == 5:
-                    self.status_detail.text = "Tests failed — re-run to fix, or skip to continue."
-                elif event.step_number == 8:
+                if event.step_number in (5, 7, 9):
                     self.status_detail.text = "Tests failed — re-run to fix, or skip to continue."
                 else:
                     self.status_detail.text = "Tests failed — review results below."
@@ -345,7 +366,7 @@ class ProgressSection:
                     "background: rgba(251,191,36,0.08); border: 1px solid rgba(251,191,36,0.3)"
                 ))
 
-            self.progress_bar.value = event.step_number / 9
+            self.progress_bar.value = event.step_number / TOTAL_STEPS
             self.progress_bar.props(remove="animate")
             self.status_label.text = f"Review: {milestone}"
             self._show_milestone_review(event.step_number, milestone, artifact_file,
@@ -409,13 +430,13 @@ class ProgressSection:
         # Update rerun button label for test steps
         if step_num == 5:
             self.ms_rerun_btn.text = "Re-run Steps 3-5"
-        elif step_num == 8:
-            self.ms_rerun_btn.text = "Re-run Steps 6-8"
+        elif step_num in (7, 9):
+            self.ms_rerun_btn.text = "Re-run Steps 6-9"
         else:
             self.ms_rerun_btn.text = "Re-run Step"
 
         # For test steps with failures: disable Continue, show Skip & Continue
-        if has_failures and step_num in (5, 8):
+        if has_failures and step_num in (5, 7, 9):
             self.ms_continue_btn.set_visibility(False)
             self.ms_skip_btn.set_visibility(True)
         else:
@@ -492,8 +513,8 @@ class ProgressSection:
                 current_step = run_row.get("current_step", 1) if run_row else 1
 
                 if decision == "rerun":
-                    # Go back to regenerate: step 5→3, step 8→6, others→same step
-                    resume_step = {5: 3, 8: 6}.get(current_step, current_step)
+                    # Go back to regenerate: step 5→3, step 7/9→6, others→same step
+                    resume_step = {5: 3, 7: 6, 9: 6}.get(current_step, current_step)
                 else:
                     # Continue: resume from next step
                     resume_step = current_step + 1
@@ -527,10 +548,10 @@ class ProgressSection:
                 self.status_detail.text = "Re-generating validation rules, JSON output, then re-testing..."
                 for s in (3, 4, 5):
                     self._update_step_visual(s, "pending")
-            elif ms_step == 8:
-                self.status_label.text = "Re-running Steps 6-8"
-                self.status_detail.text = "Re-generating workflow, simulator config, then re-testing..."
-                for s in (6, 7, 8):
+            elif ms_step in (7, 9):
+                self.status_label.text = "Re-running Steps 6-9"
+                self.status_detail.text = "Re-generating workflow, MOP, simulator config, then re-testing..."
+                for s in (6, 7, 8, 9):
                     self._update_step_visual(s, "pending")
             else:
                 self.status_label.text = "Re-running Step"
@@ -567,7 +588,7 @@ class ProgressSection:
         self.status_label.text = "No active pipeline run"
         self.status_detail.text = "Start a new run from the upload section"
         self.banner.style(replace="background: rgba(108,99,255,0.06)")
-        for i in range(1, 10):
+        for i in range(1, TOTAL_STEPS + 1):
             self._update_step_visual(i, "pending")
 
     async def _restart(self):

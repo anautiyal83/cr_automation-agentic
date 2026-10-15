@@ -26,7 +26,7 @@ class TestExecutor:
             self.step_number = 5
             self.step_name = "CIQ Validation Tester"
         else:
-            self.step_number = 8
+            self.step_number = 9
             self.step_name = "Execution Tester"
 
     async def execute(

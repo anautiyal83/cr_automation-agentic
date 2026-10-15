@@ -210,16 +210,29 @@ body.body--light {
 .cr-bg-surface-light { background: var(--cr-surface-light) !important; }
 .cr-border { border-color: var(--cr-border) !important; }
 .cr-step-circle {
-    width: 40px; height: 40px; border-radius: 50%;
+    width: 36px; height: 36px; border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
     background: var(--cr-surface-light); border: 2px solid var(--cr-border);
     transition: all 0.3s ease;
 }
 .cr-step-circle-active { background: rgba(108,99,255,0.15); }
 .cr-step-connector {
-    width: 20px; height: 2px; background: var(--cr-border);
-    margin-top: 20px; flex-shrink: 0;
+    flex-shrink: 0; display: flex; align-items: center; margin-top: 16px;
 }
+.cr-step-connector::before {
+    content: ''; display: block; width: 16px; height: 2px;
+    background: var(--cr-border); transition: background 0.3s;
+}
+.cr-step-connector::after {
+    content: ''; display: block; width: 0; height: 0;
+    border-top: 5px solid transparent; border-bottom: 5px solid transparent;
+    border-left: 6px solid var(--cr-border); transition: border-color 0.3s;
+}
+.cr-step-row-connector {
+    display: flex; align-items: center; justify-content: center;
+    padding: 2px 0; color: var(--cr-border);
+}
+.cr-step-row-connector svg { width: 20px; height: 20px; }
 .cr-card-inner {
     background: var(--cr-surface-light) !important;
     border: 1px solid var(--cr-border) !important;
@@ -253,8 +266,8 @@ html, body { margin: 0 !important; }
 .cr-sidebar {
     background: var(--cr-surface) !important;
     border-right: 1px solid var(--cr-border);
-    width: 220px;
-    min-width: 220px;
+    width: 160px;
+    min-width: 160px;
     height: calc(100vh - 48px);
     max-height: calc(100vh - 48px);
     position: fixed;
@@ -273,8 +286,8 @@ html, body { margin: 0 !important; }
 .cr-sidebar-item {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 6px 14px;
+    gap: 6px;
+    padding: 5px 10px;
     cursor: pointer;
     transition: all 0.15s ease;
     color: var(--cr-text-dim);
@@ -301,8 +314,8 @@ html, body { margin: 0 !important; }
     margin: 4px 12px;
 }
 .cr-content {
-    margin-left: 220px;
-    padding: 8px 12px;
+    margin-left: 160px;
+    padding: 6px 10px;
     height: calc(100vh - 48px);
     overflow-y: auto;
     overflow-x: hidden;

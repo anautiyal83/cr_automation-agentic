@@ -15,13 +15,14 @@ STEP_NAMES = {
     4: "JSON Output Generator",
     5: "CIQ Validation Tester",
     6: "Workflow Generator",
-    7: "Simulator Config Generator",
-    8: "Execution Tester",
-    9: "Final Report Generator",
+    7: "MOP Generation Tester",
+    8: "Simulator Config Generator",
+    9: "Execution Tester",
+    10: "Final Report Generator",
 }
 
 # Steps that use LLM (others are deterministic)
-LLM_STEPS = {1, 2, 3, 4, 6, 7}
+LLM_STEPS = {1, 2, 3, 4, 6, 8}
 
 
 class AgentStep(Protocol):

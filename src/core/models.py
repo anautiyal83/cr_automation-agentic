@@ -96,7 +96,7 @@ class PipelineRun(BaseModel):
 class StepResult(BaseModel):
     id: uuid.UUID = Field(default_factory=_uuid)
     run_id: uuid.UUID
-    step_number: int = Field(..., ge=1, le=9)
+    step_number: int = Field(..., ge=1, le=10)
     step_name: str
     status: StepStatus = StepStatus.PENDING
     started_at: datetime | None = None
