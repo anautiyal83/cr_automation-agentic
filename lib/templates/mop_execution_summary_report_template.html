@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{PAGE_TITLE}}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; background: #f4f6f9; color: #333; font-size: 12px; }
+
+    /* ── Page header ─────────────────────────────────────────────────────── */
+    .page-header { background: #1a3a5c; color: #fff; padding: 20px 30px; }
+    .page-header h1 { font-size: 18px; font-weight: 600; margin-bottom: 4px; }
+    .page-header-meta { font-size: 11px; color: #b0c4d8; }
+
+    /* ── Metadata bar ────────────────────────────────────────────────────── */
+    .meta-bar {
+      margin: 12px 30px 0;
+      background: #e8f0fe;
+      border-left: 4px solid #1a3a5c;
+      border-radius: 0 6px 6px 0;
+      padding: 8px 14px;
+      display: flex; flex-wrap: wrap; gap: 6px 22px;
+      font-size: 11px;
+    }
+    .meta-item { display: flex; align-items: center; gap: 5px; }
+    .meta-icon { font-size: 12px; }
+    .meta-label { color: #1a3a5c; font-weight: 600; }
+    .meta-value { color: #333; }
+
+    /* ── Stat cards ──────────────────────────────────────────────────────── */
+    .card-row { display: flex; flex-wrap: wrap; gap: 12px; }
+    .card {
+      flex: 1; min-width: 150px;
+      border-radius: 8px; padding: 14px 18px; color: #fff;
+      box-shadow: 0 2px 6px rgba(0,0,0,.10);
+    }
+    .card--default { background: linear-gradient(135deg, #1a3a5c, #2a5a8c); }
+    .card--success  { background: linear-gradient(135deg, #1e7e45, #27ae60); }
+    .card--failed   { background: linear-gradient(135deg, #a93226, #c0392b); }
+    .card-title    { font-size: 10px; font-weight: 600; opacity: .85; text-transform: uppercase; letter-spacing: .05em; }
+    .card-subtitle { font-size: 10px; opacity: .70; margin-top: 2px; }
+    .card-counter  { font-size: 30px; font-weight: 700; line-height: 1; margin-top: 6px; }
+
+    /* ── Section wrapper ─────────────────────────────────────────────────── */
+    .section-block {
+      margin: 16px 30px 0;
+      background: #fff;
+      border: 1px solid #c8d8f0;
+      border-radius: 8px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.07);
+      overflow: hidden;
+    }
+    .section-block-header {
+      background: #1a3a5c; color: #fff;
+      padding: 8px 14px;
+      font-size: 12px; font-weight: 600;
+    }
+
+    /* ── Badges ──────────────────────────────────────────────────────────── */
+    .badge {
+      display: inline-block;
+      padding: 1px 5px; border-radius: 10px;
+      font-size: 9px; font-weight: 600; white-space: nowrap;
+    }
+    .badge-success { background: #d4edda; color: #155724; }
+    .badge-error   { background: #f8d7da; color: #721c24; }
+    .badge-warning { background: #fff3cd; color: #856404; }
+    .badge-skipped { background: #e2e3e5; color: #6c757d; }
+
+    /* ── Summary matrix table ────────────────────────────────────────────── */
+    .table-container {
+      overflow-x: auto;
+      border: 1px solid #c8d8f0; border-radius: 0 0 8px 8px;
+      box-shadow: 0 1px 2px rgba(0,0,0,.05);
+    }
+    .table { width: auto; min-width: 100%; border-collapse: collapse; font-size: 10px; table-layout: fixed; }
+    .table thead tr { background: #1a3a5c; color: #fff; }
+    .table th {
+      padding: 7px 6px; text-align: center; font-weight: 600;
+      white-space: nowrap; border-right: 1px solid rgba(255,255,255,.12);
+    }
+    .table th.col-node { text-align: left; width: 60px; }
+    .table td.col-node { width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .table th.col-overall { border-left: 2px solid rgba(255,255,255,.25); width: 65px; }
+    .table th.col-phase { font-size: 9px; padding: 5px 3px; width: 65px; overflow: hidden; word-break: break-word; }
+    .table th.col-time { border-left: 1px solid rgba(255,255,255,.15); width: 120px; font-size: 10px; }
+    .table td.col-time { border-left: 1px solid #e8ecf0; font-size: 10px; white-space: nowrap; }
+    .table td {
+      padding: 5px 10px; border-bottom: 1px solid #e8ecf0;
+      border-right: 1px solid #e8ecf0;
+      text-align: center; vertical-align: middle;
+    }
+    .table td.col-node { text-align: left; font-weight: 600; white-space: nowrap; }
+    .table td.col-overall { border-left: 2px solid #c8d8f0; }
+    .table td.col-na { color: #bbb; }
+    .table tbody tr:nth-child(even) { background: #f8f9fa; }
+    .table tbody tr:hover td { background: #e8f0fe; }
+    .table tbody tr.row-failed td { background: #fff5f5; }
+    .table tbody tr.row-failed:hover td { background: #ffe0e0; }
+
+    /* ── Footer ──────────────────────────────────────────────────────────── */
+    footer { margin: 20px 30px 24px; font-size: 11px; color: #999; border-top: 1px solid #dde; padding-top: 10px; }
+
+    @media print {
+      body { background: #fff; }
+      .section-block { box-shadow: none; border: 1px solid #ccc; }
+    }
+    @media (max-width: 768px) {
+      .page-header, .meta-bar, .section-block, footer { margin-left: 12px; margin-right: 12px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Page header -->
+  <div class="page-header">
+    <h1>{{REPORT_HEADER}}</h1>
+    <div class="page-header-meta">{{CR_GROUP_SUBTITLE}} &nbsp;|&nbsp; {{REPORT_SUBHEADER}}</div>
+  </div>
+
+  <!-- Metadata bar -->
+  <div class="meta-bar">
+    <div class="meta-item">
+      <span class="meta-icon">&#128197;</span>
+      <span class="meta-label">Generated On:</span>
+      <span class="meta-value">{{META_GENERATED_ON}}</span>
+    </div>
+    <div class="meta-item">
+      <span class="meta-icon">&#128203;</span>
+      <span class="meta-label">Request ID:</span>
+      <span class="meta-value">{{META_REQUEST_ID}}</span>
+    </div>
+    <div class="meta-item">
+      <span class="meta-icon">&#128421;</span>
+      <span class="meta-label">Node Type:</span>
+      <span class="meta-value">{{META_NODE_TYPE}}</span>
+    </div>
+    <div class="meta-item">
+      <span class="meta-icon">&#9881;</span>
+      <span class="meta-label">Activity:</span>
+      <span class="meta-value">{{META_ACTIVITY}}</span>
+    </div>
+    <div class="meta-item">
+      <span class="meta-icon">&#128101;</span>
+      <span class="meta-label">CR Group:</span>
+      <span class="meta-value">{{META_CR_GROUP}}</span>
+    </div>
+  </div>
+
+  <!-- Overall stat cards -->
+  <div class="section-block">
+    <div class="section-block-header">Overall Summary</div>
+    <div style="padding:16px 18px">
+      <div class="card-row">
+        <div class="card card--default">
+          <div class="card-title">Total Nodes</div>
+          <div class="card-subtitle">&#9730; Executed</div>
+          <div class="card-counter">{{TOTAL_NODES}}</div>
+        </div>
+        <div class="card card--success">
+          <div class="card-title">Passed Nodes</div>
+          <div class="card-subtitle">&#10004; All Phases OK</div>
+          <div class="card-counter">{{PASSED_NODES}}</div>
+        </div>
+        <div class="card card--failed">
+          <div class="card-title">Failed Nodes</div>
+          <div class="card-subtitle">&#10006; Errors Detected</div>
+          <div class="card-counter">{{FAILED_NODES}}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Phase matrix -->
+  <div class="section-block">
+    <div class="section-block-header">Node &amp; Phase Status</div>
+    <div class="table-container">
+      <table class="table">
+        <thead>
+          <tr>
+            <th class="col-node">Node</th>
+            {{SUMMARY_PHASE_HEADERS}}
+            <th class="col-overall">Overall</th>
+            <th class="col-time">Start Time</th>
+            <th class="col-time">End Time</th>
+            <th class="col-time">Duration</th>
+          </tr>
+        </thead>
+        <tbody>{{SUMMARY_TABLE_ROWS}}</tbody>
+      </table>
+    </div>
+  </div>
+
+  <footer>Generated by Execution Report Generator &nbsp;|&nbsp; {{META_GENERATED_ON}}</footer>
+
+</body>
+</html>

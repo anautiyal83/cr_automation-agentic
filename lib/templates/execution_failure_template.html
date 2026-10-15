@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{PAGE_TITLE}}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; background: #f4f6f9; color: #333; font-size: 12px; }
+
+    .page-header { background: #1a3a5c; color: #fff; padding: 20px 30px; }
+    .page-header h1 { font-size: 18px; font-weight: 600; margin-bottom: 4px; }
+    .page-header-meta { font-size: 11px; color: #b0c4d8; }
+
+    .meta-bar {
+      margin: 12px 30px 0; background: #e8f0fe;
+      border-left: 4px solid #1a3a5c; border-radius: 0 6px 6px 0;
+      padding: 8px 14px; display: flex; flex-wrap: wrap; gap: 6px 22px; font-size: 11px;
+    }
+    .meta-item { display: flex; align-items: center; gap: 5px; }
+    .meta-label { color: #1a3a5c; font-weight: 600; }
+
+    .card-row { display: flex; flex-wrap: wrap; gap: 12px; }
+    .card { flex: 1; min-width: 140px; border-radius: 8px; padding: 14px 18px; color: #fff; box-shadow: 0 2px 6px rgba(0,0,0,.10); }
+    .card--default { background: linear-gradient(135deg, #1a3a5c, #2a5a8c); }
+    .card--success  { background: linear-gradient(135deg, #1e7e45, #27ae60); }
+    .card--failed   { background: linear-gradient(135deg, #a93226, #c0392b); }
+    .card--warning  { background: linear-gradient(135deg, #b7770d, #d4920f); }
+    .card--info     { background: linear-gradient(135deg, #1f6899, #2980b9); }
+    .card-title    { font-size: 10px; font-weight: 600; opacity: .85; text-transform: uppercase; letter-spacing: .05em; }
+    .card-subtitle { font-size: 10px; opacity: .70; margin-top: 2px; }
+    .card-counter  { font-size: 30px; font-weight: 700; line-height: 1; margin-top: 6px; }
+
+    .section-block {
+      margin: 16px 30px 0; background: #fff;
+      border: 1px solid #c8d8f0; border-radius: 8px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.07); overflow: hidden;
+    }
+    .section-block-header { background: #1a3a5c; color: #fff; padding: 8px 14px; font-size: 12px; font-weight: 600; }
+    .section-block-body { padding: 16px 18px; }
+
+    .badge { display: inline-block; padding: 1px 5px; border-radius: 10px; font-size: 9px; font-weight: 600; white-space: nowrap; }
+    .badge-success  { background: #d4edda; color: #155724; }
+    .badge-error    { background: #f8d7da; color: #721c24; }
+    .badge-warning  { background: #fff3cd; color: #856404; }
+    .badge-info     { background: #d1ecf1; color: #0c5460; }
+    .badge-enabled  { background: #d4edda; color: #155724; }
+    .badge-disabled { background: #e9ecef; color: #6c757d; }
+
+    .table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    .table thead tr { background: #1a3a5c; color: #fff; }
+    .table th { padding: 6px 8px; text-align: left; font-weight: 600; white-space: nowrap; }
+    .table td { padding: 5px 8px; border-bottom: 1px solid #e8ecf0; vertical-align: top; }
+    .table tbody tr:nth-child(even) { background: #f8f9fa; }
+    .table tbody tr:hover td { background: #e8f0fe; }
+    .summary-row { cursor: pointer; }
+    .summary-row.row-hidden { display: none; }
+    .cell-success { color: #155724; font-weight: 600; }
+    .cell-failed  { color: #721c24; font-weight: 600; }
+    .cell-warning { color: #856404; font-weight: 600; }
+
+    /* ── Node search ─────────────────────────────────────────────────────── */
+    .filter-bar { margin: 16px 30px 0; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .filter-wrap { position: relative; flex: 1; min-width: 200px; max-width: 420px; }
+    .filter-icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: #888; font-size: 14px; pointer-events: none; }
+    #nodeSearchInput {
+      width: 100%; padding: 7px 32px;
+      border: 1px solid #b0c4d8; border-radius: 20px;
+      font-size: 13px; outline: none;
+    }
+    #nodeSearchInput:focus { border-color: #1a3a5c; }
+    #filterClear { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: #999; font-size: 14px; display: none; }
+    .node-search-hint { font-size: 12px; color: #666; }
+    #noMatchMsg { display: none; margin: 8px 30px 0; padding: 10px 16px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 6px; font-size: 13px; color: #856404; }
+
+    /* ── Pagination ──────────────────────────────────────────────────────── */
+    .pagination-bar {
+      margin: 12px 30px 0; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    }
+    .pagination-info { font-size: 12px; color: #555; flex: 1; }
+    .pagination-btn {
+      padding: 5px 14px; border: 1px solid #b0c4d8; border-radius: 20px;
+      background: #fff; color: #1a3a5c; font-size: 11px; font-weight: 600; cursor: pointer;
+    }
+    .pagination-btn:hover { background: #e8f0fe; }
+    .pagination-btn:disabled { opacity: .4; cursor: default; }
+
+    /* ── Node panel controls ─────────────────────────────────────────────── */
+    .node-details-controls { display: flex; gap: 8px; margin: 10px 30px 0; flex-wrap: wrap; }
+
+    /* ── Node panels ─────────────────────────────────────────────────────── */
+    .node-panel {
+      margin: 10px 30px 0; background: #fff;
+      border: 1px solid #c8d8f0; border-radius: 8px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.07); overflow: hidden;
+    }
+    .node-panel.panel-hidden { display: none; }
+    .node-panel.page-hidden  { display: none; }
+    .node-panel-header {
+      background: linear-gradient(90deg, #1a3a5c 0%, #2a5a8c 100%);
+      color: #fff; padding: 12px 18px; cursor: pointer;
+      display: flex; align-items: center; gap: 10px; user-select: none;
+    }
+    .node-panel-header:hover { filter: brightness(1.08); }
+    .node-panel.panel-failed .node-panel-header { background: linear-gradient(90deg, #922b21 0%, #c0392b 100%); }
+    .node-index { font-size: 11px; opacity: .7; flex-shrink: 0; }
+    .node-name  { font-size: 13px; font-weight: 600; flex: 1; }
+    .node-panel-stats-inline { display: flex; gap: 10px; font-size: 11px; opacity: .85; }
+    .inline-success { color: #a8e6cf; font-weight: 600; }
+    .inline-failed  { color: #ffaaa5; font-weight: 600; }
+    .node-toggle-btn { background: rgba(255,255,255,.18); border: none; color: #fff; cursor: pointer; border-radius: 4px; padding: 2px 7px; font-size: 11px; flex-shrink: 0; }
+    .node-toggle-btn:hover { background: rgba(255,255,255,.32); }
+    .node-panel-body { display: none; padding: 16px 18px; border-top: 1px solid #c8d8f0; }
+    .node-panel-body.expanded { display: block; }
+
+    .node-summary-cards { margin-bottom: 14px; }
+    .card-row + .card-row { margin-top: 10px; }
+
+    /* ── Activity timing bar ─────────────────────────────────────────────── */
+    .node-timing-bar {
+      display: flex; flex-wrap: wrap; gap: 6px 20px;
+      background: #e8f0fe; border-radius: 6px; padding: 7px 12px;
+      margin-bottom: 10px; font-size: 11px;
+    }
+    .timing-item { display: flex; gap: 4px; align-items: center; }
+    .timing-label { color: #1a3a5c; font-weight: 600; }
+    .timing-duration { font-weight: 600; color: #1e7e45; }
+
+    /* ── Per-node toolbar ────────────────────────────────────────────────── */
+    .node-toolbar { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; align-items: center; }
+    .search-input {
+      flex: 1; min-width: 180px; max-width: 360px;
+      padding: 5px 12px; border: 1px solid #b0c4d8; border-radius: 20px; font-size: 12px; outline: none;
+    }
+    .search-input:focus { border-color: #1a3a5c; }
+    .btn-sm {
+      padding: 4px 12px; border: 1px solid #b0c4d8; border-radius: 20px;
+      font-size: 11px; font-weight: 600; cursor: pointer; background: #fff; color: #1a3a5c; white-space: nowrap;
+    }
+    .btn-sm:hover { background: #e8f0fe; }
+    .btn-sm.active { background: #1a3a5c; color: #fff; border-color: #1a3a5c; }
+
+    /* ── Command table ───────────────────────────────────────────────────── */
+    .table-container { overflow: auto; border: 1px solid #c8d8f0; border-radius: 6px; }
+    .phase-header-row { cursor: pointer; user-select: none; }
+    .phase-header-row td { background: #e8f0fe; color: #1a3a5c; font-size: 11px; font-weight: 700; padding: 5px 10px; border-top: 2px solid #1a3a5c !important; }
+    .phase-header-row:hover td { background: #d8e8fc; }
+    .phase-toggle-icon { display: inline-block; font-size: 11px; margin-right: 5px; }
+    .col-command { min-width: 200px; }
+    .command-code { font-family: 'Consolas','Monaco',monospace; background: #1e1e1e; color: #d4d4d4; padding: 2px 5px; border-radius: 3px; font-size: 10px; white-space: pre-wrap; word-break: break-all; }
+    .row-data.failed-hidden { display: none; }
+
+    .output-toggle { background: #1a3a5c; color: #fff; border: none; padding: 2px 8px; border-radius: 10px; font-size: 10px; cursor: pointer; white-space: nowrap; }
+    .output-toggle:hover { background: #2a5a8c; }
+    .output-content { display: none; margin-top: 6px; padding: 8px 12px; border-radius: 4px; background: #1e1e1e; color: #d4d4d4; border-left: 3px solid #2a5a8c; overflow-x: auto; }
+    .output-content.show { display: block; }
+    .output-content pre { font-family: 'Consolas','Monaco',monospace; font-size: 10px; line-height: 1.5; white-space: pre; }
+    .na-text { color: #999; font-style: italic; }
+
+    /* ── Action buttons ──────────────────────────────────────────────────── */
+    .actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin: 20px 30px; }
+    .btn { padding: 6px 16px; border: none; border-radius: 20px; font-size: 11px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
+    .btn-primary { background: #1a3a5c; color: #fff; }
+    .btn-primary:hover { background: #2a5a8c; }
+    .btn-secondary { background: #fff; color: #1a3a5c; border: 1px solid #b0c4d8; }
+    .btn-secondary:hover { background: #e8f0fe; }
+
+    footer { margin: 0 30px 24px; font-size: 12px; color: #999; border-top: 1px solid #dde; padding-top: 12px; }
+
+    @media print {
+      .filter-bar, .pagination-bar, .node-details-controls, .node-toolbar,
+      .actions, .output-toggle { display: none !important; }
+      .output-content, .node-panel-body { display: block !important; }
+      .node-panel.page-hidden { display: block !important; }
+      body { background: #fff; }
+    }
+    @media (max-width: 768px) {
+      .page-header, .meta-bar, .section-block, .filter-bar,
+      .pagination-bar, .node-details-controls, .node-panel, .actions, footer { margin-left: 12px; margin-right: 12px; }
+      .node-panel-stats-inline { display: none; }
+      .table { min-width: 900px; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="page-header">
+    <h1>{{REPORT_HEADER}}</h1>
+    <div class="page-header-meta">MOP Execution Detail Report &nbsp;|&nbsp; {{CR_GROUP_SUBTITLE}}</div>
+  </div>
+
+  <div class="meta-bar">
+    <div class="meta-item"><span class="meta-label">Generated On:</span> <span>{{META_GENERATED_ON}}</span></div>
+    <div class="meta-item"><span class="meta-label">Request ID:</span> <span>{{META_REQUEST_ID}}</span></div>
+    <div class="meta-item"><span class="meta-label">Node Type:</span> <span>{{META_NODE_TYPE}}</span></div>
+    <div class="meta-item"><span class="meta-label">Activity:</span> <span>{{META_ACTIVITY}}</span></div>
+    <div class="meta-item"><span class="meta-label">CR Group:</span> <span>{{META_CR_GROUP}}</span></div>
+  </div>
+
+  <div class="section-block">
+    <div class="section-block-header">&#128202; MOP Execution Summary</div>
+    <div class="section-block-body">
+      <div class="card-row">
+        <div class="card card--default"><div class="card-title">{{STAT_LABEL_TOTAL}}</div><div class="card-subtitle">&#128203; In Report</div><div class="card-counter">{{TOTAL_NODES}}</div></div>
+        <div class="card card--success"><div class="card-title">{{STAT_LABEL_PASSED}}</div><div class="card-subtitle">&#10004; All Commands OK</div><div class="card-counter">{{PASSED_NODES}}</div></div>
+        <div class="card card--failed"><div class="card-title">{{STAT_LABEL_FAILED}}</div><div class="card-subtitle">&#10006; Has Errors</div><div class="card-counter">{{FAILED_NODES}}</div></div>
+      </div>
+      <div class="table-container" style="margin-top:16px">
+        <table class="table" id="mopSummaryTable">
+          <thead><tr>
+            <th>Node Name</th><th>Status</th><th>Total</th><th>Success</th><th>Failed</th>
+            <th>Val.Enabled</th><th>Val.Pass</th><th>Val.Fail</th><th>Warnings</th><th>Info Only</th>
+            <th>Start Time</th><th>End Time</th><th>Duration</th>
+          </tr></thead>
+          <tbody>{{NODES_SUMMARY_ROWS}}</tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="filter-bar">
+    <div class="filter-wrap">
+      <span class="filter-icon">&#128269;</span>
+      <input type="text" id="nodeSearchInput" placeholder="Filter nodes by name&hellip;" autocomplete="off" oninput="filterNodes(this.value)">
+      <button id="filterClear" onclick="clearNodeSearch()">&#10005;</button>
+    </div>
+    <span class="node-search-hint" id="nodeSearchHint"></span>
+  </div>
+  <div id="noMatchMsg">No nodes match <strong id="noMatchTerm"></strong>.</div>
+
+  <div class="pagination-bar" id="paginationBar">
+    <button class="pagination-btn" id="btnPrev" onclick="changePage(-1)">&#9664; Prev</button>
+    <span class="pagination-info" id="pageInfo"></span>
+    <button class="pagination-btn" id="btnNext" onclick="changePage(1)">Next &#9654;</button>
+  </div>
+
+  <div class="node-details-controls">
+    <button class="btn btn-secondary" onclick="expandAll()">&#9660; Expand All</button>
+    <button class="btn btn-secondary" onclick="collapseAll()">&#9650; Collapse All</button>
+  </div>
+
+  {{NODE_DETAIL_SECTIONS}}
+
+  <div class="actions" style="margin-top:20px">
+    <button class="btn btn-primary"   onclick="window.print()">&#128438; Print Report</button>
+    <button class="btn btn-secondary" onclick="exportToXLSX()">&#128202; Export XLSX</button>
+  </div>
+
+  <footer>Generated by Execution Report Generator &nbsp;|&nbsp; {{META_GENERATED_ON}} &nbsp;|&nbsp; {{META_NODE_TYPE}} &mdash; {{META_ACTIVITY}}</footer>
+
+<script>
+  // ── Lazy-load data stores ──────────────────────────────────────────────
+  var RAW_OUTPUTS      = {{RAW_OUTPUTS_JS}};
+  var VAL_CONCLUSIONS  = {{VAL_CONCLUSIONS_JS}};
+
+  // ── Pagination ────────────────────────────────────────────────────────
+  var PAGE_SIZE    = 25;
+  var currentPage  = 0;
+  var visiblePanels = [];   // panels not hidden by node-search
+
+  function getAllPanels() {
+    return Array.prototype.slice.call(document.querySelectorAll('.node-panel'));
+  }
+
+  function applyPagination() {
+    var all = getAllPanels();
+    visiblePanels = all.filter(function(p) { return !p.classList.contains('panel-hidden'); });
+    var total = visiblePanels.length;
+    var pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    if (currentPage >= pages) currentPage = pages - 1;
+
+    all.forEach(function(p) { p.classList.add('page-hidden'); });
+    var start = currentPage * PAGE_SIZE;
+    visiblePanels.slice(start, start + PAGE_SIZE).forEach(function(p) { p.classList.remove('page-hidden'); });
+
+    var info = document.getElementById('pageInfo');
+    if (info) info.textContent = total === 0
+      ? 'No nodes'
+      : 'Nodes ' + (start + 1) + '–' + Math.min(start + PAGE_SIZE, total) + ' of ' + total;
+
+    var prev = document.getElementById('btnPrev');
+    var next = document.getElementById('btnNext');
+    if (prev) prev.disabled = currentPage === 0;
+    if (next) next.disabled = currentPage >= pages - 1;
+
+    var bar = document.getElementById('paginationBar');
+    if (bar) bar.style.display = total <= PAGE_SIZE ? 'none' : 'flex';
+  }
+
+  function changePage(delta) {
+    currentPage += delta;
+    applyPagination();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  // ── Node search ───────────────────────────────────────────────────────
+  function filterNodes(term) {
+    term = term.trim().toLowerCase();
+    var panels = getAllPanels();
+    var matched = 0;
+    panels.forEach(function(p) {
+      var name = p.querySelector('.node-name');
+      var show = !term || (name && name.textContent.toLowerCase().indexOf(term) !== -1);
+      if (show) { p.classList.remove('panel-hidden'); matched++; }
+      else       { p.classList.add('panel-hidden'); }
+    });
+    document.querySelectorAll('#mopSummaryTable tbody tr.summary-row').forEach(function(row) {
+      var cell = row.querySelector('td:first-child');
+      var show = !term || (cell && cell.textContent.toLowerCase().indexOf(term) !== -1);
+      row.classList.toggle('row-hidden', !show);
+    });
+    var hint = document.getElementById('nodeSearchHint');
+    if (hint) hint.textContent = term ? (matched + ' node' + (matched !== 1 ? 's' : '') + ' found') : '';
+    var clr = document.getElementById('filterClear');
+    if (clr) clr.style.display = term ? 'block' : 'none';
+    var nm = document.getElementById('noMatchMsg');
+    if (nm) { nm.style.display = (term && matched === 0) ? 'block' : 'none'; document.getElementById('noMatchTerm').textContent = '"' + term + '"'; }
+    currentPage = 0;
+    applyPagination();
+  }
+
+  function clearNodeSearch() {
+    var input = document.getElementById('nodeSearchInput');
+    if (input) { input.value = ''; filterNodes(''); input.focus(); }
+  }
+
+  // ── Node panel toggle ─────────────────────────────────────────────────
+  function toggleNode(id) {
+    var body = document.getElementById('node-body-'   + id);
+    var btn  = document.getElementById('node-toggle-' + id);
+    var exp  = body.classList.toggle('expanded');
+    if (btn) btn.innerHTML = exp ? '&#9660;' : '&#9654;';
+  }
+
+  function expandAll() {
+    visiblePanels.forEach(function(p) {
+      if (!p.classList.contains('page-hidden')) {
+        var id   = p.id.replace('node-panel-', '');
+        var body = document.getElementById('node-body-'   + id);
+        var btn  = document.getElementById('node-toggle-' + id);
+        if (body) { body.classList.add('expanded'); }
+        if (btn)  { btn.innerHTML = '&#9660;'; }
+      }
+    });
+  }
+
+  function collapseAll() {
+    document.querySelectorAll('.node-panel-body').forEach(function(b) { b.classList.remove('expanded'); });
+    document.querySelectorAll('.node-toggle-btn').forEach(function(b) { b.innerHTML = '&#9654;'; });
+  }
+
+  function scrollToNode(id) {
+    var panel = document.getElementById('node-panel-' + id);
+    if (!panel) return;
+    // find its page
+    var idx = visiblePanels.indexOf(panel);
+    if (idx !== -1) { currentPage = Math.floor(idx / PAGE_SIZE); applyPagination(); }
+    var body = document.getElementById('node-body-'   + id);
+    var btn  = document.getElementById('node-toggle-' + id);
+    if (body) body.classList.add('expanded');
+    if (btn)  btn.innerHTML = '&#9660;';
+    setTimeout(function() { panel.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 50);
+  }
+
+  // ── Phase collapse ────────────────────────────────────────────────────
+  function togglePhase(header) {
+    var icon = header.querySelector('.phase-toggle-icon');
+    var collapsed = header.classList.toggle('phase-collapsed');
+    var row = header.nextElementSibling;
+    while (row && !row.classList.contains('phase-header-row')) {
+      if (!row.classList.contains('failed-hidden')) row.style.display = collapsed ? 'none' : '';
+      row = row.nextElementSibling;
+    }
+    if (icon) icon.innerHTML = collapsed ? '&#9654;' : '&#9660;';
+  }
+
+  // ── Failed-only filter ────────────────────────────────────────────────
+  function toggleFailedOnly(nodeId) {
+    var btn   = document.getElementById('failed-toggle-' + nodeId);
+    var table = document.getElementById('table-' + nodeId);
+    if (!btn || !table) return;
+    var active = btn.classList.toggle('active');
+    btn.textContent = active ? 'Show All' : 'Failed Only';
+    table.querySelectorAll('tr.row-data').forEach(function(row) {
+      row.classList.toggle('failed-hidden', active && row.getAttribute('data-failed') === '0');
+    });
+  }
+
+  // ── Per-node table search ─────────────────────────────────────────────
+  function filterNodeTable(nodeId) {
+    var input = document.getElementById('search-' + nodeId);
+    var table = document.getElementById('table-'  + nodeId);
+    if (!input || !table) return;
+    var term = input.value.toLowerCase();
+    table.querySelectorAll('tbody tr.row-data').forEach(function(row) {
+      row.style.display = row.textContent.toLowerCase().indexOf(term) !== -1 ? '' : 'none';
+    });
+  }
+
+  // ── Lazy output loader ────────────────────────────────────────────────
+  function loadOutput(btn, key) {
+    var box = btn.nextElementSibling;
+    if (!box.querySelector('pre')) {
+      var pre = document.createElement('pre');
+      pre.textContent = RAW_OUTPUTS[key] || '';
+      box.appendChild(pre);
+    }
+    var visible = box.classList.toggle('show');
+    btn.textContent = visible ? 'Hide Output' : 'View Output';
+  }
+
+  function loadValDetail(btn, key) {
+    var box = btn.nextElementSibling;
+    if (!box.querySelector('pre')) {
+      var pre = document.createElement('pre');
+      pre.textContent = VAL_CONCLUSIONS[key] || '';
+      box.appendChild(pre);
+    }
+    var visible = box.classList.toggle('show');
+    btn.textContent = visible ? 'Hide Details' : 'View Details';
+  }
+
+  // ── XLSX export ───────────────────────────────────────────────────────
+  function exportToXLSX() {
+    var wb = XLSX.utils.book_new();
+    var headers = ['Node','Phase','Command','Description','Target Node','Execution Status',
+                   'Reason of Failure','Validation Set','Validation Criteria','Validation Status','Validation Conclusion',
+                   'Start Time','End Time','Duration'];
+    var allData = [headers];
+    document.querySelectorAll('.node-panel').forEach(function(panel) {
+      var nodeName = panel.querySelector('.node-name') ? panel.querySelector('.node-name').textContent.trim() : '';
+      panel.querySelectorAll('tbody tr.row-data').forEach(function(row) {
+        if (row.style.display === 'none') return;
+        var cells = row.querySelectorAll('td');
+        var key   = row.getAttribute('data-key') || '';
+        allData.push([
+          nodeName,
+          row.getAttribute('data-phase') || '',
+          cells[0].textContent.trim(),
+          cells[1].textContent.trim(),
+          cells[2].textContent.trim(),
+          cells[3].textContent.trim(),
+          cells[4].textContent.trim(),
+          cells[5].textContent.trim(),
+          cells[6].textContent.trim(),
+          cells[7].textContent.trim(),
+          VAL_CONCLUSIONS[key] || cells[8].textContent.trim(),
+          cells[9].textContent.trim(),
+          cells[10].textContent.trim(),
+          cells[11].textContent.trim()
+        ]);
+      });
+    });
+    var ws = XLSX.utils.aoa_to_sheet(allData);
+    ws['!cols'] = [{width:20},{width:22},{width:20},{width:28},{width:18},{width:14},{width:25},{width:10},{width:28},{width:14},{width:32},{width:18},{width:18},{width:10}];
+    XLSX.utils.book_append_sheet(wb, ws, 'Detail Report');
+    XLSX.writeFile(wb, 'MOP_Detail_Report_' + new Date().toISOString().slice(0,10) + '.xlsx');
+  }
+
+  // ── Init ──────────────────────────────────────────────────────────────
+  document.addEventListener('DOMContentLoaded', function() {
+    visiblePanels = getAllPanels();
+    applyPagination();
+  });
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+<!-- Sub-templates -->
+<script type="text/x-html-template" id="tpl-summary-row">
+<tr class="summary-row" onclick="scrollToNode('{{SR_NID}}')" title="Jump to {{SR_NAME}}">
+  <td><strong>{{SR_NAME}}</strong></td>
+  <td><span class="badge {{SR_BADGE_CLS}}">{{SR_STATUS}}</span></td>
+  <td>{{SR_TOTAL}}</td>
+  <td class="cell-success">{{SR_SUCCESS}}</td>
+  <td class="cell-failed">{{SR_FAILED}}</td>
+  <td>{{SR_VAL_ENABLED}}</td>
+  <td class="cell-success">{{SR_VAL_PASS}}</td>
+  <td class="cell-failed">{{SR_VAL_FAIL}}</td>
+  <td class="cell-warning">{{SR_VAL_WARN}}</td>
+  <td>{{SR_INFO_ONLY}}</td>
+  <td>{{SR_START_TIME}}</td>
+  <td>{{SR_END_TIME}}</td>
+  <td>{{SR_DURATION}}</td>
+</tr>
+</script>
+
+<script type="text/x-html-template" id="tpl-phase-header">
+<tr class="phase-header-row" onclick="togglePhase(this)">
+  <td colspan="13"><span class="phase-toggle-icon">&#9660;</span> {{PH_PHASE}} <span class="badge {{PH_BADGE_CLS}}">{{PH_STATUS}}</span></td>
+</tr>
+</script>
+
+<script type="text/x-html-template" id="tpl-command-row">
+<tr class="row-data" data-phase="{{CR_PHASE}}" data-failed="{{CR_IS_FAILED}}" data-key="{{CR_KEY}}">
+  <td><code class="command-code">{{CR_CMD}}</code></td>
+  <td>{{CR_DESC}}</td>
+  <td>{{CR_TARGET}}</td>
+  <td><span class="badge {{CR_EXEC_BADGE}}">{{CR_EXEC_LABEL}}</span></td>
+  <td><span class="na-text">{{CR_FAIL_REASON}}</span></td>
+  <td><span class="badge {{CR_VALIDATE_BADGE}}">{{CR_VALIDATE_LABEL}}</span></td>
+  <td>{{CR_VAL_CRITERIA}}</td>
+  <td><span class="badge {{CR_VAL_BADGE}}">{{CR_VAL_STATUS}}</span></td>
+  <td>{{CR_VAL_DETAIL}}</td>
+  <td>{{CR_START_TIME}}</td>
+  <td>{{CR_END_TIME}}</td>
+  <td>{{CR_DURATION}}</td>
+  <td><button class="output-toggle" onclick="loadOutput(this,'{{CR_KEY}}')">View Output</button><div class="output-content"></div></td>
+</tr>
+</script>
+
+<script type="text/x-html-template" id="tpl-val-detail-static">
+<span class="na-text">{{VD_TEXT}}</span>
+</script>
+
+<script type="text/x-html-template" id="tpl-val-detail-expandable">
+<button class="output-toggle" onclick="loadValDetail(this,'{{CR_KEY}}')">View Details</button><div class="output-content"></div>
+</script>
+
+<script type="text/x-html-template" id="tpl-node-panel">
+<div class="node-panel{{NP_PANEL_CLS}}" id="node-panel-{{NP_ID}}">
+  <div class="node-panel-header" onclick="toggleNode('{{NP_ID}}')">
+    <span class="node-index">#{{NP_INDEX}}</span>
+    <span class="node-name">{{NP_NAME}}</span>
+    <span class="badge {{NP_BADGE_CLS}}">{{NP_STATUS}}</span>
+    <div class="node-panel-stats-inline">
+      <span>Cmds: {{NP_TOTAL}}</span>
+      <span class="inline-success">&#10004; {{NP_SUCCESS}}</span>
+      <span class="inline-failed">&#10006; {{NP_FAILED}}</span>
+    </div>
+    <button class="node-toggle-btn" id="node-toggle-{{NP_ID}}">&#9654;</button>
+  </div>
+  <div class="node-panel-body" id="node-body-{{NP_ID}}">
+    <div class="node-summary-cards">
+      <div class="card-row">
+        <div class="card card--default"><div class="card-title">Total Commands</div><div class="card-subtitle">&#9730; Executed</div><div class="card-counter">{{NP_TOTAL}}</div></div>
+        <div class="card card--success"><div class="card-title">Succeeded</div><div class="card-subtitle">&#10004; OK</div><div class="card-counter">{{NP_SUCCESS}}</div></div>
+        <div class="card card--failed"><div class="card-title">Failed</div><div class="card-subtitle">&#10006; Errors</div><div class="card-counter">{{NP_FAILED}}</div></div>
+      </div>
+      <div class="card-row">
+        <div class="card card--default"><div class="card-title">Validations</div><div class="card-subtitle">&#9745; Configured</div><div class="card-counter">{{NP_VAL_TOTAL}}</div></div>
+        <div class="card card--success"><div class="card-title">Val. Pass</div><div class="card-subtitle">&#10004; Checks OK</div><div class="card-counter">{{NP_VAL_PASS}}</div></div>
+        <div class="card card--failed"><div class="card-title">Val. Failed</div><div class="card-subtitle">&#10006; Critical</div><div class="card-counter">{{NP_VAL_FAIL}}</div></div>
+        <div class="card card--warning"><div class="card-title">Warnings</div><div class="card-subtitle">&#9888; Attention</div><div class="card-counter">{{NP_VAL_WARN}}</div></div>
+        <div class="card card--info"><div class="card-title">Info Only</div><div class="card-subtitle">&#9432; No Validation</div><div class="card-counter">{{NP_INFO_ONLY}}</div></div>
+      </div>
+    </div>
+    <div class="node-timing-bar">
+      <span class="timing-item"><span class="timing-label">Activity Start:</span> {{NP_START_TIME}}</span>
+      <span class="timing-item"><span class="timing-label">Activity End:</span> {{NP_END_TIME}}</span>
+      <span class="timing-item timing-duration"><span class="timing-label">Total Duration:</span> {{NP_DURATION}}</span>
+    </div>
+    <div class="node-toolbar">
+      <input type="text" class="search-input" id="search-{{NP_ID}}" placeholder="Search commands..." oninput="filterNodeTable('{{NP_ID}}')">
+      <button class="btn-sm" id="failed-toggle-{{NP_ID}}" onclick="toggleFailedOnly('{{NP_ID}}')">Failed Only</button>
+    </div>
+    <div class="table-container">
+      <table class="table" id="table-{{NP_ID}}">
+        <thead><tr>
+          <th class="col-command">Command</th><th>Description</th><th>Target Node</th>
+          <th>Exec Status</th><th>Fail Reason</th><th>Validate</th>
+          <th>Val Criteria</th><th>Val Status</th><th>Val Conclusion</th>
+          <th>Start Time</th><th>End Time</th><th>Duration</th><th>Output</th>
+        </tr></thead>
+        <tbody>{{NP_COMMAND_ROWS}}</tbody>
+      </table>
+    </div>
+  </div>
+</div>
+</script>
+</body>
+</html>

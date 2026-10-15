@@ -189,6 +189,40 @@ def _validate_against_ciq(yaml_text: str, ciq_path: str) -> list[str]:
     except Exception:
         pass
 
+    # Validate row rule structure
+    VALID_RULE_KEYS = {"unique_key", "one_of", "all_or_none", "require", "forbid",
+                       "only_one", "sum", "equals", "pooled_unique", "compare"}
+    RULES_WITH_WHEN = {"require", "forbid", "compare"}
+    for sheet_name, sheet_def in sheets_def.items():
+        if not isinstance(sheet_def, dict):
+            continue
+        sheet_rules = sheet_def.get("rules", []) or []
+        for rule in sheet_rules:
+            if not isinstance(rule, dict):
+                continue
+            rule_keys = set(rule.keys()) - {"when", "message"}
+            unknown = rule_keys - VALID_RULE_KEYS
+            if unknown:
+                mismatches.append(
+                    f"Unknown row rule key {unknown} in sheet '{sheet_name}'. "
+                    f"Valid keys: {sorted(VALID_RULE_KEYS)}"
+                )
+            # forbid/require must be a single column name, not a list
+            for key in ("forbid", "require"):
+                if key in rule and isinstance(rule[key], list):
+                    mismatches.append(
+                        f"'{key}' in sheet '{sheet_name}' must be a single column name (string), not a list. "
+                        f"Got: {rule[key]}"
+                    )
+            # when condition validation — only for require/forbid/compare
+            has_when_rule = rule_keys & RULES_WITH_WHEN
+            when = rule.get("when")
+            if has_when_rule and isinstance(when, dict) and when and "column" not in when:
+                mismatches.append(
+                    f"'when' condition in sheet '{sheet_name}' must use {{column: X, operator: Y, value: Z}} format. "
+                    f"Got: {when}"
+                )
+
     return mismatches
 
 
@@ -260,6 +294,7 @@ class ValidationGenAgent:
         # QA feedback from Step 5 — failed test cases from previous run
         qa_feedback = ""
         qa_data = input_data.get("qa_feedback", [])
+        logger.info("Step 3: qa_feedback has %d failed TCs", len(qa_data) if qa_data else 0)
         if qa_data:
             qa_lines = [
                 "\n\n=== QA TEST FEEDBACK (from previous Step 5 run) ===",
@@ -460,12 +495,25 @@ report_output:
             "- Add skipValidationValues: [MANO_EMPTY] at root level when MANO_EMPTY is seen in any column data\n"
             "- Columns containing MANO_EMPTY should still be typed as string — MANO_EMPTY is a valid string constant\n\n"
 
-            "ROW RULES (per sheet):\n"
-            "- Add unique_key for natural primary keys (e.g. [Node, CRGroup] for Index, [Node, NIAM NAME] for IP)\n"
-            "- Add require/forbid with when conditions from constraints\n"
-            "- Use one_of: [ColA, ColB] when at least one of multiple columns must be filled\n"
-            "- Use all_or_none: [ColA, ColB] when columns must all be filled or all empty\n"
-            "- DO NOT use 'at_least_one: true' — that is NOT valid syntax\n\n"
+            "ROW RULES (per sheet) — EXACT SYNTAX:\n"
+            "- unique_key: [ColA, ColB]    — composite primary key (ALWAYS include for natural keys)\n"
+            "- one_of: [ColA, ColB]        — at least one must be non-blank (use when CIQ data shows alternating blanks)\n"
+            "- ONLY add require/forbid/all_or_none if USER CONSTRAINTS explicitly require them\n"
+            "- DO NOT invent require/forbid/all_or_none rules from sample data — they will cause false failures\n"
+            "- DO NOT add all_or_none for groups of columns unless explicitly requested in constraints\n"
+            "- DO NOT add forbid rules unless explicitly requested in constraints\n"
+            "- If you must use require/forbid, the EXACT syntax is:\n"
+            "    - require: ColName\n"
+            "      when:\n"
+            "        column: TriggerCol\n"
+            "        operator: notBlank       # equals|notEquals|blank|notBlank\n"
+            "    - forbid: ColName   (SINGLE string, NOT a list)\n"
+            "      when:\n"
+            "        column: TriggerCol\n"
+            "        operator: equals\n"
+            "        value: \"someValue\"\n"
+            "- DO NOT use forbid: [list] — forbid takes a SINGLE column name\n"
+            "- DO NOT use when: {ColName: {not_equals: val}} — use column/operator/value format\n\n"
 
             "OUTPUTS (always include):\n"
             "- CR_LIST: { sheet: <Index sheet name>, column: <CRGroup column>, aggregate: distinct, separator: \",\" }\n"

@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{PAGE_TITLE}}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; background: #f4f6f9; color: #333; font-size: 14px; }
+
+    /* === Header === */
+    .header { background: #1a3a5c; color: #fff; padding: 20px 30px; }
+    .header h1 { font-size: 22px; font-weight: 600; margin-bottom: 8px; }
+    .header-meta { display: flex; gap: 30px; font-size: 13px; color: #b0c4d8; flex-wrap: wrap; }
+
+    .approval-banner {
+      margin: 20px 30px 0; padding: 10px 18px;
+      background: #fff3cd; border: 2px solid #ffc107; border-radius: 6px;
+      font-weight: bold; font-size: 13px; color: #856404;
+    }
+
+    /* === Node / infra chips === */
+    .node-chip {
+      display: inline-block; background: #1a3a5c; color: #fff;
+      border-radius: 12px; padding: 2px 10px; margin: 2px 3px; font-size: 0.84em;
+    }
+    .infra-chip {
+      display: inline-block; background: #5a6a7a; color: #fff;
+      border-radius: 12px; padding: 2px 10px; margin: 2px 3px; font-size: 0.84em;
+    }
+    .node-chip .chip-sub, .infra-chip .chip-sub { opacity: 0.72; font-size: 0.85em; margin-left: 3px; }
+
+    /* === NodeGroup → Nodes mapping panel (merged, single panel) === */
+    .ng-mapping-panel {
+      margin: 14px 30px; background: #fff;
+      border: 1px solid #c8d8f0; border-radius: 8px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06); overflow: hidden;
+    }
+    .ng-mapping-title {
+      background: linear-gradient(90deg, #1a3a5c 0%, #2a5a8c 100%);
+      color: #fff; padding: 8px 16px; font-size: 13px; font-weight: 700; letter-spacing: 0.3px;
+    }
+    .ng-mapping-body { padding: 10px 16px; }
+    .ng-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .ng-table th { background: #e8f0fe; color: #1a3a5c; padding: 5px 12px; text-align: left; font-weight: 700; border-bottom: 2px solid #c8d8f0; }
+    .ng-table td { padding: 5px 12px; border-bottom: 1px solid #edf0f5; vertical-align: middle; }
+    .ng-table tbody tr:last-child td { border-bottom: none; }
+    .ng-name-cell { font-weight: 700; color: #1a3a5c; white-space: nowrap; width: 160px; }
+    .ng-infra-row { margin-top: 10px; padding-top: 8px; border-top: 1px solid #e0e8f4; font-size: 12px; color: #555; display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap; }
+    .ng-infra-label { font-weight: 600; color: #1a3a5c; white-space: nowrap; padding-top: 3px; }
+
+    /* === Filter bar === */
+    .filter-bar { margin: 14px 30px 10px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .filter-wrap { position: relative; flex: 1; min-width: 200px; max-width: 420px; }
+    .filter-icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: #888; font-size: 14px; pointer-events: none; }
+    #phaseFilter {
+      width: 100%; padding: 7px 32px 7px 32px;
+      border: 1px solid #b0c4d8; border-radius: 20px; font-size: 13px;
+      outline: none; background: #fff; color: #333; transition: border-color 0.15s;
+    }
+    #phaseFilter:focus { border-color: #1a3a5c; box-shadow: 0 0 0 2px rgba(26,58,92,0.12); }
+    #filterClear { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: #999; font-size: 15px; line-height: 1; display: none; padding: 0; }
+    #filterClear:hover { color: #333; }
+    .filter-count { font-size: 12px; color: #666; white-space: nowrap; }
+    .filter-count b { color: #1a3a5c; }
+    .unit-block.hidden-entry { display: none; }
+    #noMatchMsg { display: none; margin: 0 30px 12px; padding: 10px 16px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 6px; font-size: 13px; color: #856404; }
+
+    /* === Phase entry blocks — default blue theme === */
+    .unit-block {
+      margin: 0 30px 10px; background: #fff;
+      border: 1px solid #c8d8f0; border-radius: 8px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.07); overflow: hidden;
+    }
+    .unit-block[open] { border-color: #1a3a5c; }
+
+    .unit-summary {
+      display: flex; align-items: center; gap: 0.7em; padding: 10px 18px;
+      background: linear-gradient(90deg, #1a3a5c 0%, #2a5a8c 100%);
+      color: #fff; cursor: pointer; list-style: none; user-select: none;
+    }
+    .unit-summary::-webkit-details-marker { display: none; }
+    .unit-summary::marker { display: none; }
+    .toggle-icon { font-size: 1em; transition: transform 0.2s; flex-shrink: 0; }
+    .unit-block[open] .toggle-icon { transform: rotate(90deg); }
+    .unit-label { font-weight: 700; font-size: 13px; flex: 1; letter-spacing: 0.3px; }
+
+    /* === Rollback phase — amber/red theme to distinguish from activity === */
+    .rollback-block { border-color: #e0b8a0; }
+    .rollback-block[open] { border-color: #8b3010; }
+    .rollback-block .unit-summary {
+      background: linear-gradient(90deg, #7b2010 0%, #b03a20 100%);
+    }
+    .rollback-block .badge-ng {
+      background: rgba(255,210,180,0.18); border-color: rgba(255,200,160,0.45);
+    }
+    .rollback-block .step-section { border-left-color: #b03a20; }
+    .rollback-block .step-section-heading { background: #fff4f0; color: #7b2010; border-color: #f0d0c0; }
+    .rollback-block .step-toggle { color: #b03a20; }
+    .rollback-block .step-name-tag { color: #b03a20; }
+    .rollback-block .step-ng-tag { background: #7b2010; }
+
+    /* NodeGroup badge — only element shown in header next to phase name */
+    .badge-ng {
+      background: rgba(255,255,255,0.18); border: 1px solid rgba(255,255,255,0.35);
+      border-radius: 10px; padding: 2px 12px; font-size: 12px;
+      white-space: nowrap; color: #e8f0fb; font-weight: 600;
+    }
+
+    .unit-content { padding: 0 18px 16px 18px; }
+    .phase-desc { font-size: 12px; color: #555; font-style: italic; margin: 8px 0 6px 0; }
+
+    /* === Step sub-sections inside a phase block (collapsable) === */
+    .step-section { margin: 12px 0 0 0; border-left: 3px solid #2a5a8c; border-radius: 0 4px 4px 0; }
+    .step-section + .step-section { margin-top: 10px; }
+    .step-section-heading {
+      color: #1a3a5c; font-size: 12px; font-weight: 700;
+      padding: 5px 10px; background: #f0f4fc;
+      border-bottom: 1px solid #d0dcf0;
+      display: flex; align-items: center; gap: 8px;
+      cursor: pointer; list-style: none; user-select: none;
+    }
+    .step-section-heading::-webkit-details-marker { display: none; }
+    .step-section-heading::marker { display: none; }
+    .step-toggle { font-size: 10px; color: #2a5a8c; transition: transform 0.2s; flex-shrink: 0; }
+    .step-section[open] .step-toggle { transform: rotate(90deg); }
+    .step-section-content { padding: 6px 10px 8px 10px; }
+    .step-ng-tag {
+      display: inline-block; background: #1a3a5c; color: #fff;
+      border-radius: 8px; padding: 1px 8px; font-size: 11px; font-weight: 600;
+    }
+    .step-name-tag { color: #2a5a8c; }
+
+    /* === Command table === */
+    .cmd-table { width: 100%; border-collapse: collapse; font-size: 12px; margin: 6px 0 0 0; table-layout: fixed; }
+    .cmd-table col.col-num        { width: 3%;  }
+    .cmd-table col.col-cmd        { width: 28%; }
+    .cmd-table col.col-desc       { width: 18%; }
+    .cmd-table col.col-target     { width: 9%;  }
+    .cmd-table col.col-validation { width: 17%; }
+    .cmd-table col.col-conditions { width: 25%; }
+    .cmd-table thead tr { background: #1a3a5c; color: #fff; }
+    .cmd-table th { padding: 6px 10px; text-align: left; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .cmd-table td { padding: 5px 10px; border-bottom: 1px solid #e0e0e0; vertical-align: top; overflow-wrap: break-word; word-break: break-word; }
+    .cmd-table tbody tr:nth-child(even) { background: #f8f9fa; }
+    .cmd-table tbody tr:hover { background: #e8f0fe; }
+    .cmd-table code { display: block; background: #1e1e1e; color: #d4d4d4; padding: 4px 8px; border-radius: 3px; font-size: 11.5px; white-space: pre-wrap; overflow-wrap: break-word; word-break: break-word; }
+    .cmd-num { color: #888; text-align: center; }
+    .conditions-cell { overflow-wrap: break-word; word-break: break-word; }
+    .cond-label { display: inline-block; border-radius: 3px; padding: 1px 7px; font-size: 11px; font-weight: 600; white-space: nowrap; margin-bottom: 2px; }
+    .cond-always   { background: #e9ecef; color: #555; }
+    .cond-runs     { background: #d4edda; color: #155724; }
+    .cond-skip     { background: #fff3cd; color: #856404; }
+    .cond-success  { background: #e8d5f5; color: #5a2d82; }
+    .cond-warning  { background: #ffe5b4; color: #8a4b00; }
+    .cond-failure  { background: #f8d7da; color: #721c24; }
+    .cond-text     { display: block; font-size: 11px; color: #444; margin-bottom: 4px; }
+
+    footer { margin: 30px; font-size: 12px; color: #999; border-top: 1px solid #dde; padding-top: 12px; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>MOP Approval Summary</h1>
+    <div class="header-meta">
+      <span><b>Node Type:</b> {{NODE_TYPE}}</span>
+      <span><b>Activity:</b> {{ACTIVITY}}</span>
+      <span><b>CR Group:</b> <span id="metaCrGroup">--</span></span>
+      <span><b>Generated:</b> <span id="metaGenerated">--</span></span>
+    </div>
+  </div>
+
+  <div class="approval-banner">
+    &#9888; APPROVAL COPY &mdash; For review and sign-off only. Do <strong>NOT</strong> use for direct execution.
+  </div>
+
+  <!-- NodeGroup → Nodes mapping (merged single panel) -->
+  <div id="ngMappingPanel"></div>
+
+  <!-- Filter -->
+  <div class="filter-bar">
+    <div class="filter-wrap">
+      <span class="filter-icon">&#128269;</span>
+      <input type="text" id="phaseFilter" placeholder="Filter by phase or NodeGroup&hellip;" autocomplete="off" spellcheck="false">
+      <button id="filterClear" title="Clear filter">&#10005;</button>
+    </div>
+    <span class="filter-count" id="filterCount"></span>
+  </div>
+  <div id="noMatchMsg">No phases match <strong id="noMatchTerm"></strong>. <a href="#" id="filterReset">Clear filter</a></div>
+
+  <div id="unitsContainer" style="margin-top: 4px;"></div>
+
+  <footer>
+    Generated by MOP Generator Utility (Schema V2) &nbsp;|&nbsp;
+    <span id="footerGenerated">--</span> &nbsp;|&nbsp;
+    APPROVAL COPY &mdash; Not for direct execution
+  </footer>
+
+  <script>
+    const MOP_GROUPS = {{GROUPS_JSON}};
+
+    // ── Utility ──────────────────────────────────────────────────────────────────
+
+    function escapeHtml(v) {
+      return String(v == null ? '' : v)
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+        .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+    }
+
+    // ── Command parsing ───────────────────────────────────────────────────────────
+
+    function parseDecoratedCommand(raw) {
+      const rawText         = (raw && typeof raw === 'object') ? raw.text             : raw;
+      const rawValidation   = (raw && typeof raw === 'object') ? raw.validation       : '';
+      const rawTarget       = (raw && typeof raw === 'object') ? raw.target           : '';
+      const rawExecCriteria = (raw && typeof raw === 'object') ? raw.executionCriteria : '';
+      const rawConditions   = (raw && typeof raw === 'object') ? raw.conditions       : '';
+      const out = {
+        phase: 'Commands', phaseDescription: '', description: '',
+        command:           String(rawText         == null ? '' : rawText),
+        validation:        String(rawValidation   == null ? '' : rawValidation),
+        target:            String(rawTarget       == null ? '' : rawTarget),
+        executionCriteria: String(rawExecCriteria == null ? '' : rawExecCriteria),
+        conditions:        String(rawConditions   == null ? '' : rawConditions)
+      };
+      let text = out.command.trim();
+      if (text.startsWith('[')) {
+        const end = text.indexOf(']');
+        if (end > 1) {
+          const inside = text.substring(1, end);
+          const colon  = inside.indexOf(':');
+          if (colon >= 0) { out.phase = inside.substring(0, colon).trim() || 'Commands'; out.phaseDescription = inside.substring(colon + 1).trim(); }
+          else             { out.phase = inside.trim() || 'Commands'; }
+          text = text.substring(end + 1).trim();
+        }
+      }
+      const split = text.indexOf(' :: ');
+      if (split >= 0) { out.description = text.substring(0, split).trim(); out.command = text.substring(split + 4).trim(); }
+      else             { out.command = text; }
+      return out;
+    }
+
+    function toPhaseGroups(commands) {
+      const groups = [], byKey = {};
+      (commands || []).forEach(raw => {
+        const item = parseDecoratedCommand(raw);
+        const key  = item.phase + '\x00' + item.phaseDescription;
+        if (!byKey[key]) { byKey[key] = { phase: item.phase, phaseDescription: item.phaseDescription, commands: [] }; groups.push(byKey[key]); }
+        byKey[key].commands.push(item);
+      });
+      return groups;
+    }
+
+    // Compare two flat command arrays for equality.
+    // Both the send command (after ::) AND the step description (before ::) must match
+    // so that phases whose descriptions include ${nodeGroup} are correctly treated as
+    // different across NodeGroups even when the send text is the same.
+    function commandTextsMatch(a, b) {
+      if (!a || !b || a.length !== b.length) return false;
+      for (let i = 0; i < a.length; i++) {
+        if ((a[i].command     || '') !== (b[i].command     || '')) return false;
+        if ((a[i].description || '') !== (b[i].description || '')) return false;
+      }
+      return true;
+    }
+
+    // Remove step entries whose commands are identical to an already-seen entry
+    function deduplicateSteps(steps) {
+      if (!steps || steps.length <= 1) return steps || [];
+      const unique = [];
+      for (const s of steps) {
+        if (!unique.some(u => commandTextsMatch(u.commands, s.commands))) unique.push(s);
+      }
+      return unique;
+    }
+
+    // Remove duplicate commands within a flat array by (command + description).
+    // Used so that NG1 with 2 nodes (EIR1+EIR2) having identical commands
+    // doesn't count as 2x when compared against a single-node NG.
+    // Including description in the key ensures that per-NG descriptions
+    // (e.g. "for Node group NG1" vs "for Node group EIR3") are NOT collapsed.
+    function deduplicateFlatCmds(cmds) {
+      const seen = new Set();
+      return (cmds || []).filter(c => {
+        const key = (c.command || '') + '\x00' + (c.description || '');
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    }
+
+    // ── NodeGroup helpers ─────────────────────────────────────────────────────────
+
+    const NG_DEFAULT = '\x00default';
+
+    function nodeNg(n) {
+      return (n && n.nodeGroup && String(n.nodeGroup).trim()) ? String(n.nodeGroup).trim() : NG_DEFAULT;
+    }
+
+    function buildNgNodeMap(groups) {
+      const map = {}, seen = {};
+      for (const g of groups) {
+        for (const n of g.nodes || []) {
+          const ng   = nodeNg(n);
+          const name = (n && n.name) ? n.name : String(n);
+          if (!map[ng]) map[ng] = [];
+          if (!seen[ng + '|' + name]) { seen[ng + '|' + name] = true; map[ng].push(n); }
+        }
+      }
+      return map;
+    }
+
+    // ── Phase timeline builder ─────────────────────────────────────────────────────
+
+    /*
+     * Builds the phase timeline grouped by NodeGroup.
+     *
+     * For each phase:
+     *   - Phases where ALL NodeGroups have identical flat commands
+     *     → one entry, ngLabel = "NG1, NG2, NG3"  (shown once)
+     *   - Phases where NodeGroups have different commands
+     *     → one entry PER NodeGroup, each with its own step sub-sections
+     *     → step headings include: NodeGroup tag + Step name
+     */
+    function buildPhaseTimeline(groups, ngNodeMap) {
+      if (!groups || groups.length === 0) return [];
+
+      const allNgNames  = Object.keys(ngNodeMap);
+      const hasMultipleNgs = allNgNames.filter(ng => ng !== NG_DEFAULT).length > 1
+                          || allNgNames.length > 1;
+
+      // phaseNgSteps[phaseKey][ngName] = [{step, commands[]}]
+      const phaseNgSteps = {}, phaseOrder = [], phaseSeen = new Set();
+
+      function recordStep(phaseKey, phase, phaseDesc, ng, step, cmds) {
+        if (!phaseSeen.has(phaseKey)) { phaseSeen.add(phaseKey); phaseOrder.push({ key: phaseKey, phase, phaseDescription: phaseDesc }); }
+        if (!phaseNgSteps[phaseKey])     phaseNgSteps[phaseKey] = {};
+        if (!phaseNgSteps[phaseKey][ng]) phaseNgSteps[phaseKey][ng] = [];
+        phaseNgSteps[phaseKey][ng].push({ step, commands: cmds });
+      }
+
+      for (const g of groups) {
+        const step      = g.group;
+        const stepNodes = g.nodes || [];
+
+        if ((g.commands || []).length > 0) {
+          // All nodes share the same commands for this step
+          const stepNGs = new Set(stepNodes.map(n => nodeNg(n)));
+          if (stepNGs.size === 0) stepNGs.add(NG_DEFAULT);
+          const phases = toPhaseGroups(g.commands);
+          for (const pg of phases) {
+            const key = pg.phase + '\x00' + pg.phaseDescription;
+            for (const ng of stepNGs) recordStep(key, pg.phase, pg.phaseDescription, ng, step, pg.commands);
+          }
+        }
+        if ((g.commandsByNode || []).length > 0) {
+          // Commands differ per node — aggregate by NodeGroup
+          const ngCmdsMap = {};
+          for (const nc of g.commandsByNode) {
+            const nodeObj = stepNodes.find(n => n && n.name === nc.node);
+            const ng = nodeObj ? nodeNg(nodeObj) : NG_DEFAULT;
+            if (!ngCmdsMap[ng]) ngCmdsMap[ng] = [];
+            ngCmdsMap[ng].push(...(nc.commands || []));
+          }
+          for (const [ng, cmds] of Object.entries(ngCmdsMap)) {
+            const phases = toPhaseGroups(cmds);
+            for (const pg of phases) {
+              const key = pg.phase + '\x00' + pg.phaseDescription;
+              recordStep(key, pg.phase, pg.phaseDescription, ng, step, pg.commands || []);
+            }
+          }
+        }
+      }
+
+      const timeline = [];
+
+      for (const { key, phase, phaseDescription } of phaseOrder) {
+        const ngStepsMap = phaseNgSteps[key] || {};
+        const ngNames    = Object.keys(ngStepsMap);
+
+        // Compare flattened commands across all NodeGroups.
+        // 1. deduplicateSteps  — collapses Step1+Step2 when both carry identical commands
+        //                        (multiple configSequences per NG with same content).
+        // 2. deduplicateFlatCmds — collapses commands from multiple nodes in the same NG
+        //                        (e.g. EIR1+EIR2 both in NG1 with identical commands)
+        //                        so NG1's count doesn't become 2x a single-node NG.
+        const flatPerNg = ngNames.map(ng => ({
+          ng,
+          flat: deduplicateFlatCmds(deduplicateSteps(ngStepsMap[ng] || []).flatMap(s => s.commands))
+        }));
+
+        const allSame = hasMultipleNgs
+          && ngNames.length > 1
+          && flatPerNg.every(x => commandTextsMatch(x.flat, flatPerNg[0].flat));
+
+        if (allSame) {
+          // Identical across NodeGroups — show once, ngLabel = "NG1, NG2"
+          const displayNames = ngNames.filter(ng => ng !== NG_DEFAULT);
+          const ngLabel = displayNames.length > 0 ? displayNames.join(', ') : 'All NodeGroups';
+          // Deduplicate commands within each step so that NG1 with 2 identical nodes
+          // (EIR1+EIR2) doesn't render the same commands twice in the merged block.
+          const steps   = deduplicateSteps(ngStepsMap[ngNames[0]])
+                            .map(s => ({ ...s, commands: deduplicateFlatCmds(s.commands) }));
+          timeline.push({
+            merged: true,
+            phase, phaseDescription,
+            ngLabel,
+            steps
+          });
+        } else {
+          // Per NodeGroup — one entry each, with full step list.
+          // Rollback phases execute NodeGroups in reverse order (last NG first).
+          const orderedNgs = isRollbackPhase(phase) ? ngNames.slice().reverse() : ngNames;
+          for (const ng of orderedNgs) {
+            const displayNg = ng === NG_DEFAULT ? '' : ng;
+            timeline.push({
+              merged: false,
+              phase, phaseDescription,
+              ngLabel: displayNg,
+              steps: ngStepsMap[ng] || []
+            });
+          }
+        }
+      }
+
+      return timeline;
+    }
+
+    // ── Rendering ────────────────────────────────────────────────────────────────
+
+    function renderConditions(condStr) {
+      if (!condStr) return '';
+      const parts = condStr.split('|');
+      let html = '';
+      for (let i = 0; i + 1 < parts.length; i += 2) {
+        const type = parts[i].trim(), text = parts[i + 1].trim();
+        let cls = 'cond-always', label = 'Always';
+        if      (type === 'RUNS')       { cls = 'cond-runs';    label = '&#10003; Runs if'; }
+        else if (type === 'SKIP')       { cls = 'cond-skip';    label = '&#9888; Skipped if'; }
+        else if (type === 'ON_SUCCESS') { cls = 'cond-success'; label = '&#9670; On success'; }
+        else if (type === 'ON_WARNING') { cls = 'cond-warning'; label = '&#9888; On warning'; }
+        else if (type === 'ON_FAILURE') { cls = 'cond-failure'; label = '&#10007; On failure'; }
+        html += '<span class="cond-label ' + cls + '">' + label + '</span>' +
+                '<span class="cond-text">' + escapeHtml(text) + '</span>';
+      }
+      return html;
+    }
+
+    function renderCommandsTable(commands) {
+      if (!commands || commands.length === 0) return '<p style="color:#999;font-size:12px;padding:6px 0;">No commands.</p>';
+      const rows = commands.map((cmd, idx) =>
+        '<tr>' +
+        '<td class="cmd-num">'  + (idx + 1) + '</td>' +
+        '<td><code>' + escapeHtml(cmd.command) + '</code></td>' +
+        '<td>' + escapeHtml(cmd.description)   + '</td>' +
+        '<td>' + escapeHtml(cmd.target)         + '</td>' +
+        '<td>' + escapeHtml(cmd.validation)     + '</td>' +
+        '<td class="conditions-cell">' + renderConditions(cmd.conditions) + '</td>' +
+        '</tr>'
+      ).join('');
+      return '<table class="cmd-table">' +
+        '<colgroup>' +
+          '<col class="col-num"/><col class="col-cmd"/><col class="col-desc"/>' +
+          '<col class="col-target"/><col class="col-validation"/><col class="col-conditions"/>' +
+        '</colgroup>' +
+        '<thead><tr><th>#</th><th>Command</th><th>Description</th>' +
+        '<th>Target Node</th><th>Validation</th><th>Conditions / Behavior</th></tr></thead>' +
+        '<tbody>' + rows + '</tbody></table>';
+    }
+
+    function isRollbackPhase(phaseName) {
+      return phaseName && phaseName.toUpperCase().indexOf('ROLLBACK') >= 0;
+    }
+
+    function renderTimelineEntry(entry, idx) {
+      const id = 'phase-' + idx;
+
+      // Phase header badge: only NodeGroup label, no nodes
+      const badgesHtml = entry.ngLabel
+        ? '<span class="badge-ng">' + escapeHtml(entry.ngLabel) + '</span>'
+        : '';
+
+      // Determine step order: rollback phases execute in reverse (last step first)
+      const steps       = entry.steps || [];
+      let   uniqueSteps = deduplicateSteps(steps);
+      if (isRollbackPhase(entry.phase) && uniqueSteps.length > 1) {
+        uniqueSteps = uniqueSteps.slice().reverse();
+      }
+      const showSteps = uniqueSteps.length > 1;
+
+      let contentHtml;
+      if (showSteps) {
+        contentHtml = uniqueSteps.map(s => {
+          const ngTag = (!entry.merged && entry.ngLabel)
+            ? '<span class="step-ng-tag">' + escapeHtml(entry.ngLabel) + '</span>'
+            : '';
+          return '<details class="step-section" open>' +
+            '<summary class="step-section-heading">' +
+              '<span class="step-toggle">&#9654;</span>' +
+              ngTag +
+              '<span class="step-name-tag">Step: ' + escapeHtml(s.step) + '</span>' +
+            '</summary>' +
+            '<div class="step-section-content">' + renderCommandsTable(s.commands) + '</div>' +
+            '</details>';
+        }).join('');
+      } else {
+        contentHtml = renderCommandsTable(uniqueSteps[0] ? uniqueSteps[0].commands : []);
+      }
+
+      const isRollback = isRollbackPhase(entry.phase);
+      const blockClass   = isRollback ? 'unit-block rollback-block' : 'unit-block';
+      const phaseIcon    = isRollback ? '&#8635; ' : '';   /* ↺ prefix on rollback phases */
+      return '<details class="' + blockClass + '" id="' + id + '" open>' +
+        '<summary class="unit-summary">' +
+          '<span class="toggle-icon">&#9654;</span>' +
+          '<span class="unit-label">' + phaseIcon + escapeHtml(entry.phase) + '</span>' +
+          badgesHtml +
+        '</summary>' +
+        '<div class="unit-content">' +
+          (entry.phaseDescription ? '<p class="phase-desc">' + escapeHtml(entry.phaseDescription) + '</p>' : '') +
+          contentHtml +
+        '</div>' +
+        '</details>';
+    }
+
+    function renderNgMappingPanel(ngNodeMap, infraNodes) {
+      const ngs = Object.keys(ngNodeMap).filter(ng => ng !== NG_DEFAULT);
+      // Build NG table rows (or a single all-nodes row when no explicit NGs)
+      let tableHtml;
+      if (ngs.length > 0) {
+        tableHtml =
+          '<table class="ng-table">' +
+          '<thead><tr><th>NodeGroup</th><th>Nodes</th><th style="text-align:center;width:60px;">Count</th></tr></thead>' +
+          '<tbody>' +
+          ngs.map(ng => {
+            const nodes = ngNodeMap[ng] || [];
+            const chips = nodes.map(n => {
+              const name   = (n && n.name)   ? n.name   : String(n);
+              const niamId = (n && n.niamId && n.niamId.trim()) ? n.niamId.trim() : '';
+              return '<span class="node-chip">' + escapeHtml(name) +
+                (niamId ? '<span class="chip-sub">&middot; ' + escapeHtml(niamId) + '</span>' : '') + '</span>';
+            }).join('');
+            return '<tr>' +
+              '<td class="ng-name-cell">' + escapeHtml(ng) + '</td>' +
+              '<td>' + chips + '</td>' +
+              '<td style="text-align:center;color:#666;font-size:12px;">' + nodes.length + '</td>' +
+              '</tr>';
+          }).join('') +
+          '</tbody></table>';
+      } else {
+        // No explicit NodeGroups — show all nodes flat
+        const allNodes = Object.values(ngNodeMap).flat();
+        const chips = allNodes.map(n => {
+          const name   = (n && n.name)   ? n.name   : String(n);
+          const niamId = (n && n.niamId && n.niamId.trim()) ? n.niamId.trim() : '';
+          return '<span class="node-chip">' + escapeHtml(name) +
+            (niamId ? '<span class="chip-sub">&middot; ' + escapeHtml(niamId) + '</span>' : '') + '</span>';
+        }).join('');
+        tableHtml = '<div style="padding:4px 0;">' + chips + '</div>';
+      }
+      // Infra nodes footer row
+      const infraHtml = (infraNodes && infraNodes.length > 0)
+        ? '<div class="ng-infra-row">' +
+            '<span class="ng-infra-label">Workflow nodes:</span>' +
+            infraNodes.map(n => {
+              const addr = n.address && n.address.trim() ? n.address.trim() : '';
+              return '<span class="infra-chip">' + escapeHtml(n.name) +
+                '<span class="chip-sub">&middot; ' + escapeHtml(n.type) + '</span>' +
+                (addr ? '<span class="chip-sub">&middot; ' + escapeHtml(addr) + '</span>' : '') + '</span>';
+            }).join('') +
+          '</div>'
+        : '';
+      return '<div class="ng-mapping-panel">' +
+        '<div class="ng-mapping-title">&#9670; All target nodes</div>' +
+        '<div class="ng-mapping-body">' + tableHtml + infraHtml + '</div>' +
+        '</div>';
+    }
+
+    // ── Main render ───────────────────────────────────────────────────────────────
+
+    function render() {
+      const now = "{{GENERATED_DATE}}";
+      document.getElementById('metaGenerated').textContent   = now;
+      document.getElementById('footerGenerated').textContent = now;
+
+      const crGroup = MOP_GROUPS.length ? MOP_GROUPS[0].cr : '--';
+      document.getElementById('metaCrGroup').textContent = crGroup;
+
+      // Build NodeGroup map
+      const ngNodeMap  = buildNgNodeMap(MOP_GROUPS);
+      const infraNodes = MOP_GROUPS.length ? (MOP_GROUPS[0].infraNodes || []) : [];
+
+      // Merged NodeGroup → Nodes panel (includes infra nodes footer)
+      document.getElementById('ngMappingPanel').innerHTML = renderNgMappingPanel(ngNodeMap, infraNodes);
+
+      // 3. Build and render timeline
+      const timeline = buildPhaseTimeline(MOP_GROUPS, ngNodeMap);
+      document.getElementById('unitsContainer').innerHTML =
+        timeline.map((entry, idx) => renderTimelineEntry(entry, idx)).join('');
+
+      setupFilter(timeline);
+    }
+
+    function setupFilter(timeline) {
+      const input   = document.getElementById('phaseFilter');
+      const clear   = document.getElementById('filterClear');
+      const count   = document.getElementById('filterCount');
+      const noMatch = document.getElementById('noMatchMsg');
+      const noTerm  = document.getElementById('noMatchTerm');
+      const reset   = document.getElementById('filterReset');
+      const total   = timeline.length;
+
+      function applyFilter(query) {
+        const q = query.trim().toLowerCase();
+        let matched = 0;
+        timeline.forEach((entry, idx) => {
+          const el   = document.getElementById('phase-' + idx);
+          if (!el) return;
+          const text = (entry.phase + ' ' + (entry.ngLabel || '')).toLowerCase();
+          const show = !q || text.indexOf(q) !== -1;
+          el.classList.toggle('hidden-entry', !show);
+          if (show) matched++;
+        });
+        clear.style.display = q ? 'block' : 'none';
+        if (total > 0) {
+          count.innerHTML = q
+            ? 'Showing <b>' + matched + '</b> of <b>' + total + '</b>'
+            : '<b>' + total + '</b> phase entr' + (total !== 1 ? 'ies' : 'y');
+        }
+        if (q && matched === 0) { noMatch.style.display = 'block'; noTerm.textContent = '"' + query.trim() + '"'; }
+        else                    { noMatch.style.display = 'none'; }
+      }
+
+      input.addEventListener('input', () => applyFilter(input.value));
+      clear.addEventListener('click', () => { input.value = ''; applyFilter(''); input.focus(); });
+      reset.addEventListener('click', e => { e.preventDefault(); input.value = ''; applyFilter(''); input.focus(); });
+      applyFilter('');
+    }
+
+    render();
+  </script>
+</body>
+</html>

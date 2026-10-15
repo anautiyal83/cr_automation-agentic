@@ -91,6 +91,18 @@ class SettingsSection:
         if val:
             self.sim_folder.value = val
 
+        val = await self._load_setting("mop_template")
+        if val:
+            self.mop_template.value = val
+
+        val = await self._load_setting("exec_summary_template")
+        if val:
+            self.exec_summary_template.value = val
+
+        val = await self._load_setting("exec_failure_template")
+        if val:
+            self.exec_failure_template.value = val
+
         val = await self._load_setting("step_models")
         if val:
             try:
@@ -240,6 +252,23 @@ class SettingsSection:
                             "CLI Automation JAR", value="./lib/cli-automation-standalone.jar",
                         ).classes("w-full").props("outlined dense")
 
+                self._card_header("HTML Report Templates", "article",
+                                  "Templates used by cli-automation-standalone for report generation")
+                with ui.card().classes("w-full p-5 cr-card-inner"):
+                    with ui.column().classes("w-full gap-3"):
+                        self.mop_template = ui.input(
+                            "MOP Summary Template",
+                            value="./lib/templates/mop_summary_report_template_v2.html",
+                        ).classes("w-full").props("outlined dense")
+                        self.exec_summary_template = ui.input(
+                            "Execution Summary Template",
+                            value="./lib/templates/mop_execution_summary_report_template.html",
+                        ).classes("w-full").props("outlined dense")
+                        self.exec_failure_template = ui.input(
+                            "Execution Failure Template",
+                            value="./lib/templates/execution_failure_template.html",
+                        ).classes("w-full").props("outlined dense")
+
                 self._card_header("Mock Simulator", "dns",
                                   "Simulator endpoint and folder for mock configs")
                 with ui.card().classes("w-full p-5 cr-card-inner"):
@@ -280,6 +309,9 @@ class SettingsSection:
         await self._save_setting("simulator_endpoint", self.sim_endpoint.value or "")
         await self._save_setting("simulator_folder", self.sim_folder.value or "")
         await self._save_setting("api_key", self.api_key_input.value or "")
+        await self._save_setting("mop_template", self.mop_template.value or "")
+        await self._save_setting("exec_summary_template", self.exec_summary_template.value or "")
+        await self._save_setting("exec_failure_template", self.exec_failure_template.value or "")
 
         step_data = {}
         for i, widget in self.step_models.items():
@@ -296,5 +328,8 @@ class SettingsSection:
                 "infra_retry_backoff": float(self.backoff.value),
                 "ciq_processor_jar": self.ciq_jar.value,
                 "cli_automation_jar": self.cli_jar.value,
+                "mop_template": self.mop_template.value,
+                "exec_summary_template": self.exec_summary_template.value,
+                "exec_failure_template": self.exec_failure_template.value,
             })
         ui.notify("All settings saved", type="positive")

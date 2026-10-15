@@ -120,15 +120,17 @@ class TestExecutor:
             qa_dir=qa_dir,
         )
 
-        # ── Copy primary reports to ciq_output for downstream steps ──
+        # ── Copy reports + JSON output to ciq_output for downstream steps ──
         main_output = str(Path(run_dir) / "ciq_output")
         Path(main_output).mkdir(exist_ok=True)
-        tc01_results = str(Path(qa_dir) / "results" / "TC01")
-        if Path(tc01_results).exists():
-            for f in Path(tc01_results).iterdir():
-                dest = Path(main_output) / f.name
-                if not dest.exists():
-                    dest.write_bytes(f.read_bytes())
+        # Copy from TC01 (validation reports) and TC02 (JSON output + reports)
+        for tc_name in ("TC01", "TC02"):
+            tc_results = Path(qa_dir) / "results" / tc_name
+            if tc_results.exists():
+                for f in tc_results.iterdir():
+                    dest = Path(main_output) / f.name
+                    if not dest.exists():
+                        dest.write_bytes(f.read_bytes())
 
         # ── Phase 4: Generate QA reports ──
         html_path = str(Path(qa_dir) / "qa-execution-report.html")
@@ -155,55 +157,113 @@ class TestExecutor:
 
 
     async def _run_exec_test(self, input_data: dict, config: Any) -> StepOutput:
-        """Test workflow.yaml + simulator-config.yaml via cli-automation-standalone JAR."""
+        """Test workflow execution via cli-automation-standalone JAR.
+
+        CLI: java -jar cli-automation-standalone.jar execute
+             --json <json> --schema <schema> --yaml <workflow>
+             --node <node> --activity <name> [--cr <cr>] [--output-dir <dir>]
+        """
         failures: list[dict[str, Any]] = []
         results: dict[str, Any] = {}
         timeout = 300
 
         artifacts = input_data.get("artifacts", {})
-        run_dir = input_data.get("run_dir", ".")
+        run_dir = Path(input_data.get("run_dir", "."))
         uc_name = input_data.get("uc_name", "UC")
 
         # Save workflow and simulator config to files
-        filename_map = {
-            "workflow_yaml": f"{uc_name}.yaml",
-            "simulator_config_yaml": f"{uc_name}_simulator-config.yaml",
-        }
-        for key in ("workflow_yaml", "simulator_config_yaml"):
+        for key, fname in (
+            ("workflow_yaml", f"{uc_name}.yaml"),
+            ("simulator_config_yaml", f"{uc_name}_simulator-config.yaml"),
+            ("json_template_yaml", f"{uc_name}_json-output.yaml"),
+        ):
             content = artifacts.get(key, "")
             if content:
-                fname = filename_map.get(key, f"{uc_name}_{key.replace('_yaml', '')}.yaml")
-                fpath = Path(run_dir) / fname
-                fpath.write_text(content, encoding="utf-8")
+                fpath = run_dir / fname
+                if not fpath.exists():
+                    fpath.write_text(content, encoding="utf-8")
 
-        workflow_path = str(Path(run_dir) / f"{uc_name}.yaml")
-        sim_config_path = str(Path(run_dir) / f"{uc_name}_simulator-config.yaml")
+        workflow_path = run_dir / f"{uc_name}.yaml"
+        json_schema = run_dir / f"{uc_name}_json-output.yaml"
+        json_input = run_dir / "ciq_output" / f"{uc_name}.json"
+        exec_output_dir = run_dir / "exec_output"
+        exec_output_dir.mkdir(exist_ok=True)
 
         cli_jar = self._get_config(config, "cli_automation_jar")
 
-        if cli_jar and Path(cli_jar).exists() and Path(workflow_path).exists():
-            try:
-                cmd = ["java", "-jar", cli_jar,
-                       "--workflow", workflow_path,
-                       "--output", str(Path(run_dir) / "exec_result.json")]
-                if Path(sim_config_path).exists():
-                    cmd.extend(["--simulator-config", sim_config_path])
+        # Pre-flight checks
+        missing = []
+        if not (cli_jar and Path(cli_jar).exists()):
+            missing.append(f"JAR not found: {cli_jar}")
+        if not workflow_path.exists():
+            missing.append(f"Workflow: {workflow_path}")
+        if not json_input.exists():
+            missing.append(f"JSON input: {json_input}")
+        if not json_schema.exists():
+            missing.append(f"JSON schema: {json_schema}")
 
-                result = await asyncio.to_thread(
-                    subprocess.run, cmd,
-                    capture_output=True, text=True, timeout=timeout,
-                )
-                results["execution_test"] = {
-                    "returncode": result.returncode,
-                    "stdout": result.stdout,
-                    "stderr": result.stderr,
-                }
-                if result.returncode != 0:
-                    failures.append({"test": "workflow_execution", "error": result.stderr or "Non-zero exit code"})
-            except Exception as e:
-                failures.append({"test": "workflow_execution", "error": str(e)})
-        else:
-            logger.warning("cli-automation JAR not found at: %s — skipping execution tests", cli_jar)
+        if missing:
+            return StepOutput(
+                status="failed",
+                error={"test_failures": [{"test": "setup", "error": "\n".join(missing)}]},
+                output_data={"results": {}, "artifacts": artifacts},
+            )
+
+        # Extract first node name from JSON for --node arg
+        try:
+            json_data = json.loads(json_input.read_text(encoding="utf-8"))
+            cr_groups = json_data.get("crGroups", [])
+            first_cr = cr_groups[0].get("crGroup", "CR1") if cr_groups else "CR1"
+            # Get first node
+            first_node = ""
+            for cg in cr_groups:
+                for ng in cg.get("nodeGroups", []):
+                    for n in ng.get("nodes", []):
+                        first_node = n.get("node", "")
+                        if first_node:
+                            break
+                    if first_node:
+                        break
+                if first_node:
+                    break
+            if not first_node:
+                first_node = "node-1"
+        except Exception:
+            first_cr = "CR1"
+            first_node = "node-1"
+
+        # Build execution command
+        cmd = [
+            "java", "-jar", cli_jar,
+            "execute",
+            "--json", str(json_input),
+            "--schema", str(json_schema),
+            "--yaml", str(workflow_path),
+            "--node", first_node,
+            "--activity", uc_name,
+            "--cr", first_cr,
+            "--output-dir", str(exec_output_dir),
+        ]
+
+        try:
+            result = await asyncio.to_thread(
+                subprocess.run, cmd,
+                capture_output=True, text=True, timeout=timeout,
+            )
+            results["execution_test"] = {
+                "returncode": result.returncode,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+            }
+            if result.returncode != 0:
+                failures.append({
+                    "test": "workflow_execution",
+                    "error": (result.stderr or result.stdout or "Non-zero exit code")[:500],
+                })
+        except subprocess.TimeoutExpired:
+            failures.append({"test": "workflow_execution", "error": f"Timeout after {timeout}s"})
+        except Exception as e:
+            failures.append({"test": "workflow_execution", "error": str(e)})
 
         status = "failed" if failures else "passed"
         return StepOutput(

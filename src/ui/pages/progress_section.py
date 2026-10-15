@@ -444,8 +444,9 @@ class ProgressSection:
             self.ms_skip_btn.set_visibility(False)
 
         from pathlib import Path
-        fname = Path(artifact_file).name if artifact_file else "unknown"
+        fname = Path(artifact_file).name if artifact_file else "no artifact"
         self.ms_artifact_label.text = f"{milestone}  —  {fname}"
+        self.ms_view_btn.set_visibility(bool(artifact_file))
 
     def _show_artifact_dialog(self):
         import html as html_mod

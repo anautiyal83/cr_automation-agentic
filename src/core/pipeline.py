@@ -368,8 +368,16 @@ class PipelineOrchestrator:
                         artifacts.update(step_output)
                         step_data["artifacts"] = artifacts
                     elif step_num == 5:
-                        # CIQ validation test results
+                        # CIQ validation test results — save to disk for resume
                         step_data["ciq_test_results"] = step_output
+                        try:
+                            qa_save = run_dir / "qa_feedback.json"
+                            failed = [tc for tc in step_output.get("test_cases", [])
+                                      if tc.get("status") == "FAIL"]
+                            if failed:
+                                qa_save.write_text(json.dumps(failed, default=str), encoding="utf-8")
+                        except Exception:
+                            pass
                     elif step_num == 7:
                         # MOP generation test results
                         step_data["mop_test_results"] = step_output
@@ -419,13 +427,28 @@ class PipelineOrchestrator:
                                     artifact_file, step_output, uc_name, mode="ciq",
                                 )
                         elif step_num == 7:
-                            # Step 7: MOP generation test HTML report
+                            # Step 7: MOP generation test — show report or first MOP HTML
                             ak = "mop_test_results"
                             html_report = step_output.get("report_html", "")
                             if html_report and Path(html_report).exists():
                                 artifact_file = html_report
                             else:
-                                artifact_file = None
+                                # Fallback: check mop_output for any HTML
+                                mop_dir = run_dir / "mop_output"
+                                mop_htmls = list(mop_dir.rglob("*.html")) if mop_dir.exists() else []
+                                if mop_htmls:
+                                    artifact_file = str(mop_htmls[0])
+                                else:
+                                    # Generate a simple error page
+                                    err_path = run_dir / f"{uc_name}_mop-generation-report.html"
+                                    err_msg = str(output.get("error", {}).get("message", "MOP generation produced no output"))
+                                    err_path.write_text(
+                                        f"<html><body style='font-family:sans-serif;padding:20px'>"
+                                        f"<h2 style='color:#e74c3c'>MOP Generation Failed</h2>"
+                                        f"<pre>{err_msg}</pre></body></html>",
+                                        encoding="utf-8",
+                                    )
+                                    artifact_file = str(err_path)
                         elif step_num == 8:
                             # Step 8: Simulator config HTML overview
                             ak = "simulator_config_yaml"
@@ -694,6 +717,16 @@ class PipelineOrchestrator:
             artifacts.pop("simulator_config_yaml", None)
 
         step_data["artifacts"] = artifacts
+
+        # Load QA feedback from previous Step 5 run (for Step 3 re-generation)
+        qa_feedback_file = run_dir / "qa_feedback.json"
+        if qa_feedback_file.exists() and start_from_step <= 5:
+            try:
+                step_data["qa_feedback"] = json.loads(
+                    qa_feedback_file.read_text(encoding="utf-8"))
+                logger.info("Loaded QA feedback from %s", qa_feedback_file)
+            except Exception:
+                pass
 
         logger.info("Rebuilt step_data for resume from step %d: artifacts=%s",
                      start_from_step, list(artifacts.keys()))

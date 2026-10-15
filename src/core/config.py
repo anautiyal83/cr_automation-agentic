@@ -73,6 +73,9 @@ class PipelineConfiguration(BaseModel):
     simulator_port: int = 8080
     ciq_processor_jar: str = "./lib/ciq-processor.jar"
     cli_automation_jar: str = "./lib/cli-automation-standalone.jar"
+    mop_template: str = "./lib/templates/mop_summary_report_template_v2.html"
+    exec_summary_template: str = "./lib/templates/mop_execution_summary_report_template.html"
+    exec_failure_template: str = "./lib/templates/execution_failure_template.html"
     output_directory: str = "./data/runs"
     chunk_size_rows: int = Field(default=100)
     few_shot_count: int = Field(default=3)
