@@ -459,13 +459,21 @@ class PipelineOrchestrator:
                             )
                             artifact_file = html_path
                         elif step_num == 9:
-                            # Step 9: Execution test results — HTML report
+                            # Step 9: Execution test results — prefer JAR-generated reports
                             ak = "exec_test_results"
-                            html_path = str(run_dir / f"{uc_name}_exec-test-report.html")
-                            self._write_exec_test_report_html(
-                                html_path, step_output, uc_name,
-                            )
-                            artifact_file = html_path
+                            summary_report = step_output.get("summary_html", "")
+                            detail_report = step_output.get("report_html", "")
+                            if summary_report and Path(summary_report).exists():
+                                artifact_file = summary_report
+                            elif detail_report and Path(detail_report).exists():
+                                artifact_file = detail_report
+                            else:
+                                # Fallback: generate built-in report
+                                html_path = str(run_dir / f"{uc_name}_exec-test-report.html")
+                                self._write_exec_test_report_html(
+                                    html_path, step_output, uc_name,
+                                )
+                                artifact_file = html_path
                         elif step_num == 99999:
                             # Legacy text format (unused)
                             ak = "exec_test_results"
@@ -493,14 +501,26 @@ class PipelineOrchestrator:
                             "artifact_file": artifact_file,
                             "artifact_key": ak,
                         }
-                        # For test steps 5 & 8, include test pass/fail status
-                        if step_num in (5, 8):
+
+                        # For step 9, include extra report files for download
+                        if step_num == 9:
+                            extra_files = []
+                            for rkey in ("summary_html", "report_html"):
+                                rpath = step_output.get(rkey, "")
+                                if rpath and Path(rpath).exists() and rpath != artifact_file:
+                                    extra_files.append(rpath)
+                            if extra_files:
+                                milestone_payload["extra_artifact_files"] = extra_files
+
+                        # For test steps 5, 7, 9, include test pass/fail status
+                        if step_num in (5, 7, 9):
                             test_status = output.get("status", "passed")
                             milestone_payload["test_status"] = test_status
                             if test_status == "failed":
                                 failed_labels = {
                                     5: "CIQ Test Results — FAILED",
-                                    8: "Execution Test Results — FAILED",
+                                    7: "MOP Generation Test — FAILED",
+                                    9: "Execution Test Results — FAILED",
                                 }
                                 milestone_payload["milestone"] = failed_labels.get(step_num, milestone_name)
 

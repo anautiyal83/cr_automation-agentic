@@ -124,6 +124,9 @@ class ProgressSection:
                     self.ms_view_btn = ui.button("View Artifact", icon="visibility",
                         on_click=self._show_artifact_dialog) \
                         .props("flat color=deep-purple-6 size=sm no-caps")
+                # Extra artifact files (view/download) — populated dynamically
+                self.ms_extra_files_row = ui.row().classes("w-full items-center gap-3 cr-card-inner p-3")
+                self.ms_extra_files_row.set_visibility(False)
                 # Action buttons
                 with ui.row().classes("w-full gap-3"):
                     self.ms_continue_btn = ui.button("Continue", icon="play_arrow",
@@ -369,8 +372,10 @@ class ProgressSection:
             self.progress_bar.value = event.step_number / TOTAL_STEPS
             self.progress_bar.props(remove="animate")
             self.status_label.text = f"Review: {milestone}"
+            extra_files = event.payload.get("extra_artifact_files", [])
             self._show_milestone_review(event.step_number, milestone, artifact_file,
-                                        has_failures=has_failures)
+                                        has_failures=has_failures,
+                                        extra_artifact_files=extra_files)
         elif event.event_type == "run_completed":
             self.status_icon.name = "check_circle"
             self.status_icon.classes(replace="cr-text-success")
@@ -421,7 +426,8 @@ class ProgressSection:
             w["connector"].style(replace=f"background: {cfg['color']}")
 
     def _show_milestone_review(self, step_num: int, milestone: str, artifact_file: str,
-                               has_failures: bool = False):
+                               has_failures: bool = False,
+                               extra_artifact_files: list[str] | None = None):
         self.milestone_row.set_visibility(True)
         self.action_btns.set_visibility(False)
         self._current_artifact_file = artifact_file
@@ -448,6 +454,31 @@ class ProgressSection:
         self.ms_artifact_label.text = f"{milestone}  —  {fname}"
         self.ms_view_btn.set_visibility(bool(artifact_file))
 
+        # Render extra artifact files (view + download)
+        self.ms_extra_files_row.clear()
+        if extra_artifact_files:
+            from nicegui import app as nicegui_app
+            with self.ms_extra_files_row:
+                for fpath in extra_artifact_files:
+                    if fpath and Path(fpath).exists():
+                        ef_name = Path(fpath).name
+                        try:
+                            serve_url = nicegui_app.add_media_file(local_file=fpath)
+                        except Exception:
+                            serve_url = ""
+                        ui.icon("article", size="18px").classes("cr-text-accent")
+                        ui.label(ef_name).classes("text-body2 font-mono")
+                        if serve_url:
+                            ui.button("View", icon="visibility",
+                                      on_click=lambda u=serve_url: ui.navigate.to(u, new_tab=True)) \
+                                .props("flat color=deep-purple-6 size=sm no-caps")
+                            ui.button("Download", icon="download",
+                                      on_click=lambda u=serve_url: ui.download(u)) \
+                                .props("flat color=positive size=sm no-caps")
+            self.ms_extra_files_row.set_visibility(True)
+        else:
+            self.ms_extra_files_row.set_visibility(False)
+
     def _show_artifact_dialog(self):
         import html as html_mod
         from pathlib import Path
@@ -467,8 +498,14 @@ class ProgressSection:
             ):
                 ui.label(f"{milestone} — {Path(fpath).name if fpath else ''}") \
                     .classes("text-subtitle2 font-bold font-mono")
-                ui.button(icon="close", on_click=dialog.close) \
-                    .props("flat round size=sm color=grey-6")
+                with ui.row().classes("items-center gap-1"):
+                    if fpath and Path(fpath).exists():
+                        dl_url = app.add_media_file(local_file=fpath)
+                        ui.button("Download", icon="download",
+                                  on_click=lambda u=dl_url: ui.download(u)) \
+                            .props("flat color=positive size=sm no-caps")
+                    ui.button(icon="close", on_click=dialog.close) \
+                        .props("flat round size=sm color=grey-6")
 
             # Content
             if fpath and Path(fpath).exists():

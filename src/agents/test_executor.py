@@ -324,8 +324,16 @@ class TestExecutor:
         if summary_html:
             output_data["summary_html"] = summary_html
 
+        # Collect generated report files as step artifacts
+        step_artifacts: list[str] = []
+        if report_html and Path(report_html).exists():
+            step_artifacts.append(report_html)
+        if summary_html and Path(summary_html).exists():
+            step_artifacts.append(summary_html)
+
         return StepOutput(
             status=status,
+            artifacts=step_artifacts,
             error={"test_failures": failures} if failures else None,
             output_data=output_data,
         )
