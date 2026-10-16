@@ -119,7 +119,7 @@ class SettingsSection:
                 pass
 
     def _build_ui(self):
-        with ui.column().classes("w-full gap-4"):
+        with ui.column().classes("w-full gap-2"):
 
             # Tab navigation
             settings_tabs = [
@@ -143,7 +143,7 @@ class SettingsSection:
                     tab_btns[key].classes(add="active")
 
             # Tab bar
-            with ui.row().classes("w-full gap-2 flex-wrap"):
+            with ui.row().classes("w-full gap-1 flex-wrap"):
                 for key, label, icon in settings_tabs:
                     btn = ui.button(label, icon=icon, on_click=lambda _, k=key: switch_tab(k)) \
                         .props("flat no-caps size=sm") \
@@ -151,14 +151,12 @@ class SettingsSection:
                     tab_btns[key] = btn
 
             # ── Tab 1: API & Models ──
-            with ui.column().classes("w-full gap-4") as panel:
+            with ui.column().classes("w-full gap-2") as panel:
                 tab_panels["api"] = panel
-                self._card_header("OpenRouter API Key", "vpn_key",
-                                  "Required for LLM-powered pipeline steps (1-6)")
-                with ui.card().classes("w-full p-5 cr-card-inner"):
-                    with ui.row().classes("w-full items-end gap-3"):
+                with ui.card().classes("w-full p-3 cr-card-inner"):
+                    ui.label("OpenRouter API Key").classes("text-caption font-semibold")
+                    with ui.row().classes("w-full items-end gap-2"):
                         self.api_key_input = ui.input(
-                            "API Key",
                             placeholder="sk-or-...",
                             password=True, password_toggle_button=True,
                         ).classes("flex-1").props("outlined dense")
@@ -166,9 +164,8 @@ class SettingsSection:
                                   on_click=self._save_key) \
                             .props("unelevated color=deep-purple-6 size=sm")
 
-                self._card_header("Default LLM Model", "model_training",
-                                  "Used for all steps unless overridden per-step")
-                with ui.card().classes("w-full p-5 cr-card-inner"):
+                with ui.card().classes("w-full p-3 cr-card-inner"):
+                    ui.label("Default LLM Model").classes("text-caption font-semibold")
                     self.model_select = ui.select(
                         MODEL_OPTIONS,
                         value="openrouter/google/gemini-2.5-flash",
@@ -176,79 +173,53 @@ class SettingsSection:
                     ).classes("w-full").props("outlined dense")
 
             # ── Tab 2: Per-Step Models ──
-            with ui.column().classes("w-full gap-4") as panel:
+            with ui.column().classes("w-full gap-1") as panel:
                 tab_panels["step_models"] = panel
                 panel.set_visibility(False)
-                self._card_header("Per-Step Model Overrides", "tune",
-                                  "Assign different models to individual pipeline steps. Empty = use default.")
+                ui.label("Per-Step Model Overrides (empty = default)").classes("text-caption font-semibold cr-text-dim")
 
                 step_names = {
-                    1: "Step 1: Document Parser",
-                    2: "Step 2: UC Analyzer",
-                    3: "Step 3: Validation Rules Gen",
-                    4: "Step 4: JSON Output Gen",
-                    6: "Step 6: Workflow Gen",
-                    7: "Step 7: Simulator Config Gen",
+                    1: "1. Doc Parser", 2: "2. Analyzer", 3: "3. Rules Gen",
+                    4: "4. JSON Gen", 6: "6. Workflow", 7: "7. Sim Config",
                 }
                 step_options = {"": "Use default", **MODEL_OPTIONS}
                 self.step_models = {}
-                for i in step_names:
-                    with ui.card().classes("w-full p-4 cr-card-inner"):
-                        with ui.row().classes("items-center gap-3 w-full"):
-                            ui.icon("smart_toy", size="18px").classes("cr-text-accent")
-                            ui.label(step_names[i]).classes("text-body2 font-semibold min-w-48")
-                            self.step_models[i] = ui.select(
-                                step_options,
-                                value="",
-                                label="Model",
-                            ).classes("flex-1").props("outlined dense")
+                with ui.card().classes("w-full p-3 cr-card-inner"):
+                    with ui.column().classes("w-full gap-1"):
+                        for i in step_names:
+                            with ui.row().classes("items-center gap-2 w-full"):
+                                ui.label(step_names[i]).classes("text-caption font-semibold min-w-32")
+                                self.step_models[i] = ui.select(
+                                    step_options, value="", label="Model",
+                                ).classes("flex-1").props("outlined dense")
 
             # ── Tab 3: Retry Policy ──
-            with ui.column().classes("w-full gap-4") as panel:
+            with ui.column().classes("w-full gap-2") as panel:
                 tab_panels["retry"] = panel
                 panel.set_visibility(False)
-                self._card_header("Retry Configuration", "replay",
-                                  "Control retry behavior for test failures and infrastructure errors")
+                with ui.row().classes("w-full gap-2"):
+                    with ui.card().classes("flex-1 p-3 cr-card-inner"):
+                        ui.label("Test Failure Retries").classes("text-caption font-semibold")
+                        self.test_retry = ui.slider(min=1, max=10, value=3, step=1) \
+                            .props("label-always color=deep-purple-6")
 
-                with ui.row().classes("w-full gap-4"):
-                    with ui.card().classes("flex-1 p-5 cr-card-inner"):
-                        with ui.column().classes("gap-2"):
-                            with ui.row().classes("items-center gap-2"):
-                                ui.icon("bug_report", size="18px").classes("cr-text-accent")
-                                ui.label("Test Failure Retries").classes("text-body2 font-semibold")
-                            ui.label("Retries when generated config fails validation tests") \
-                                .classes("text-caption cr-text-dim")
-                            self.test_retry = ui.slider(min=1, max=10, value=3, step=1) \
-                                .props("label-always color=deep-purple-6")
+                    with ui.card().classes("flex-1 p-3 cr-card-inner"):
+                        ui.label("Infrastructure Retries").classes("text-caption font-semibold")
+                        self.infra_retry = ui.slider(min=1, max=10, value=3, step=1) \
+                            .props("label-always color=cyan-6")
 
-                    with ui.card().classes("flex-1 p-5 cr-card-inner"):
-                        with ui.column().classes("gap-2"):
-                            with ui.row().classes("items-center gap-2"):
-                                ui.icon("cloud_off", size="18px").classes("cr-text-accent")
-                                ui.label("Infrastructure Retries").classes("text-body2 font-semibold")
-                            ui.label("Retries for LLM API timeouts and network errors") \
-                                .classes("text-caption cr-text-dim")
-                            self.infra_retry = ui.slider(min=1, max=10, value=3, step=1) \
-                                .props("label-always color=cyan-6")
-
-                    with ui.card().classes("flex-1 p-5 cr-card-inner"):
-                        with ui.column().classes("gap-2"):
-                            with ui.row().classes("items-center gap-2"):
-                                ui.icon("timer", size="18px").classes("cr-text-accent")
-                                ui.label("Backoff Multiplier").classes("text-body2 font-semibold")
-                            ui.label("Exponential backoff factor between retries") \
-                                .classes("text-caption cr-text-dim")
-                            self.backoff = ui.number(value=2.0, min=1.0, max=10.0, step=0.5) \
-                                .props("outlined dense").classes("w-full")
+                    with ui.card().classes("flex-1 p-3 cr-card-inner"):
+                        ui.label("Backoff Multiplier").classes("text-caption font-semibold")
+                        self.backoff = ui.number(value=2.0, min=1.0, max=10.0, step=0.5) \
+                            .props("outlined dense").classes("w-full")
 
             # ── Tab 4: External Modules ──
-            with ui.column().classes("w-full gap-4") as panel:
+            with ui.column().classes("w-full gap-2") as panel:
                 tab_panels["modules"] = panel
                 panel.set_visibility(False)
-                self._card_header("Java Modules", "integration_instructions",
-                                  "Paths to cr-automation Java JAR files")
-                with ui.card().classes("w-full p-5 cr-card-inner"):
-                    with ui.column().classes("w-full gap-3"):
+                with ui.card().classes("w-full p-3 cr-card-inner"):
+                    ui.label("Java Modules").classes("text-caption font-semibold")
+                    with ui.column().classes("w-full gap-1"):
                         self.ciq_jar = ui.input(
                             "CIQ Processor JAR",
                             placeholder="./lib/ciq-processor.jar",
@@ -262,10 +233,9 @@ class SettingsSection:
                             placeholder="./lib/execution-report-generator.jar",
                         ).classes("w-full").props("outlined dense")
 
-                self._card_header("HTML Report Templates", "article",
-                                  "Templates used by cli-automation-standalone for report generation")
-                with ui.card().classes("w-full p-5 cr-card-inner"):
-                    with ui.column().classes("w-full gap-3"):
+                with ui.card().classes("w-full p-3 cr-card-inner"):
+                    ui.label("HTML Report Templates").classes("text-caption font-semibold")
+                    with ui.column().classes("w-full gap-1"):
                         self.mop_template = ui.input(
                             "MOP Summary Template",
                             value="./lib/templates/mop_summary_report_template_v2.html",
@@ -279,22 +249,21 @@ class SettingsSection:
                             value="./lib/templates/execution_failure_template.html",
                         ).classes("w-full").props("outlined dense")
 
-                self._card_header("Mock Simulator", "dns",
-                                  "Simulator endpoint and folder for mock configs")
-                with ui.card().classes("w-full p-5 cr-card-inner"):
-                    with ui.column().classes("w-full gap-3"):
+                with ui.card().classes("w-full p-3 cr-card-inner"):
+                    ui.label("Mock Simulator").classes("text-caption font-semibold")
+                    with ui.row().classes("w-full gap-2"):
                         self.sim_endpoint = ui.input(
-                            "Simulator Endpoint", value="localhost:8080",
-                        ).classes("w-full").props("outlined dense")
+                            "Endpoint", value="localhost:8080",
+                        ).classes("flex-1").props("outlined dense")
                         self.sim_folder = ui.input(
-                            "Simulator Folder", value="./lib/simulator/",
-                        ).classes("w-full").props("outlined dense")
+                            "Folder", value="./lib/simulator/",
+                        ).classes("flex-1").props("outlined dense")
 
             # Save all button — always visible
-            with ui.row().classes("w-full justify-end pt-2"):
+            with ui.row().classes("w-full justify-end"):
                 ui.button("Save All Settings", icon="save",
                           on_click=self._save_all) \
-                    .props("unelevated color=deep-purple-6 size=md")
+                    .props("unelevated color=deep-purple-6 size=sm")
 
     @staticmethod
     def _card_header(title: str, icon: str, desc: str):
