@@ -16,8 +16,23 @@ warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", message=".*huggingface.*")
 warnings.filterwarnings("ignore", message=".*unauthenticated.*")
 import logging as _logging
+
+# Configure verbose logging for the application
+_logging.basicConfig(
+    level=_logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
+# Set DEBUG for our own modules
+_logging.getLogger("src").setLevel(_logging.DEBUG)
+# Suppress noisy third-party loggers
 _logging.getLogger("huggingface_hub").setLevel(_logging.ERROR)
 _logging.getLogger("sentence_transformers").setLevel(_logging.ERROR)
+_logging.getLogger("httpx").setLevel(_logging.WARNING)
+_logging.getLogger("httpcore").setLevel(_logging.WARNING)
+_logging.getLogger("uvicorn.access").setLevel(_logging.WARNING)
+_logging.getLogger("nicegui").setLevel(_logging.WARNING)
+_logging.getLogger("watchfiles").setLevel(_logging.WARNING)
 
 from nicegui import ui, app
 

@@ -298,6 +298,10 @@ class PipelineOrchestrator:
                 ))
 
                 # Execute with retry (skip retries for deterministic steps 7-9)
+                logger.info("Executing Step %d: %s", step_num, agent.step_name)
+                import time as _time
+                _step_t0 = _time.monotonic()
+
                 async def _exec(**kwargs):
                     return (await agent.execute(
                         input_data=step_data,
@@ -326,6 +330,10 @@ class PipelineOrchestrator:
                             payload={"attempt": n, "error": str(e)},
                         )),
                     )
+
+                _step_elapsed = _time.monotonic() - _step_t0
+                logger.info("Step %d completed in %.1fs — status=%s",
+                            step_num, _step_elapsed, result.get("result", {}).get("status", "?") if result["success"] else "FAILED")
 
                 if result["success"]:
                     output = result["result"]

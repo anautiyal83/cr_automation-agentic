@@ -85,14 +85,25 @@ async def call_llm(
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": prompt})
 
+    prompt_chars = len(prompt) + len(system_prompt)
+    logger.info("LLM call: model=%s, prompt_size=%d chars", model, prompt_chars)
+
     try:
+        import time as _time
+        t0 = _time.monotonic()
         kwargs: dict[str, Any] = {"model": model, "messages": messages}
         if response_format:
             kwargs["response_format"] = response_format
         response = await litellm.acompletion(**kwargs)
-        return response.choices[0].message.content or ""
+        elapsed = _time.monotonic() - t0
+        content = response.choices[0].message.content or ""
+        usage = getattr(response, "usage", None)
+        tokens = f", tokens={usage.total_tokens}" if usage else ""
+        logger.info("LLM response: %d chars in %.1fs%s", len(content), elapsed, tokens)
+        return content
     except Exception as exc:
         err = str(exc).lower()
+        logger.error("LLM call failed: %s", exc)
         if any(kw in err for kw in ("rate", "timeout", "connection", "429", "503", "auth")):
             raise InfrastructureError(f"LLM API error: {exc}") from exc
         raise
