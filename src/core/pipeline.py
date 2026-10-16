@@ -382,8 +382,33 @@ class PipelineOrchestrator:
                         # MOP generation test results
                         step_data["mop_test_results"] = step_output
                     elif step_num == 9:
-                        # Execution test results
+                        # Execution test results — save failures as feedback for Step 8
                         step_data["exec_test_results"] = step_output
+                        try:
+                            exec_results = step_output.get("results", {}).get("execution_test", {})
+                            exec_json_dir = run_dir / "exec_output"
+                            failed_cmds = []
+                            for jf in exec_json_dir.glob("*.json"):
+                                import json as _json
+                                rpt = _json.loads(jf.read_text(encoding="utf-8"))
+                                for cmd_key, cmd_info in rpt.get("data", {}).items():
+                                    if not cmd_info.get("success") or cmd_info.get("validation_status") == "failed":
+                                        failed_cmds.append({
+                                            "command": cmd_key,
+                                            "phase": cmd_info.get("phase", ""),
+                                            "output": cmd_info.get("output", "")[:300],
+                                            "failure": cmd_info.get("failure", ""),
+                                            "validation_conclusion": cmd_info.get("validation_conclusion", ""),
+                                            "validation_criteria": cmd_info.get("validation_criteria", ""),
+                                        })
+                            if failed_cmds:
+                                exec_feedback_path = run_dir / "exec_feedback.json"
+                                exec_feedback_path.write_text(
+                                    json.dumps(failed_cmds, indent=2, default=str), encoding="utf-8")
+                                step_data["exec_feedback"] = failed_cmds
+                                logger.info("Saved %d exec failures as feedback for Step 8", len(failed_cmds))
+                        except Exception:
+                            logger.exception("Failed to save exec feedback")
                     elif step_num == 10:
                         # Final report paths
                         step_data["report_paths"] = step_output
@@ -603,22 +628,21 @@ class PipelineOrchestrator:
                                 ))
                                 step_num = 5  # will increment to 6
                             elif step_num == 9:
-                                # Step 9 (exec test) rerun: go back to step 6 to re-generate
-                                # workflow + simulator config, then re-test
-                                step_data.get("artifacts", {}).pop("workflow_yaml", None)
+                                # Step 9 (exec test) rerun: go back to step 8 to re-generate
+                                # simulator config with exec failure feedback, then re-test.
+                                # Workflow stays — only simulator responses need fixing.
                                 step_data.get("artifacts", {}).pop("simulator_config_yaml", None)
-                                step_data.pop("mop_test_results", None)
                                 step_data.pop("exec_test_results", None)
                                 await self.db.execute_insert(
-                                    "DELETE FROM step_results WHERE run_id = ? AND step_number IN (6, 7, 8, 9)",
+                                    "DELETE FROM step_results WHERE run_id = ? AND step_number IN (8, 9)",
                                     (str(run.id),),
                                 )
                                 await event_bus.publish(PipelineEvent(
                                     run_id=run.id, event_type="retry_started",
-                                    step_number=6,
-                                    payload={"attempt": 1, "error": "User requested re-run from Step 9 review"},
+                                    step_number=8,
+                                    payload={"attempt": 1, "error": "User requested re-run from Step 9 — feeding exec failures to Step 8"},
                                 ))
-                                step_num = 5  # will increment to 6
+                                step_num = 7  # will increment to 8
                             else:
                                 # LLM steps: re-run this step
                                 step_data.get("artifacts", {}).pop(ak, None)
@@ -755,6 +779,20 @@ class PipelineOrchestrator:
                 logger.info("Loaded QA feedback from %s", qa_feedback_file)
             except Exception:
                 pass
+
+        # Load exec feedback from previous Step 9 run (for Step 8 re-generation)
+        exec_feedback_file = run_dir / "exec_feedback.json"
+        if exec_feedback_file.exists() and start_from_step <= 9:
+            try:
+                step_data["exec_feedback"] = json.loads(
+                    exec_feedback_file.read_text(encoding="utf-8"))
+                logger.info("Loaded exec feedback from %s", exec_feedback_file)
+            except Exception:
+                pass
+
+        # Clear simulator config when re-running from Step 8
+        if start_from_step == 8:
+            artifacts.pop("simulator_config_yaml", None)
 
         logger.info("Rebuilt step_data for resume from step %d: artifacts=%s",
                      start_from_step, list(artifacts.keys()))

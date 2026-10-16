@@ -94,6 +94,7 @@ class SimulatorSetupAgent:
         model = get_model_for_step(7, config)
         mop_data = input_data.get("mop_data", {})
         command_outputs = input_data.get("command_outputs", {})
+        exec_feedback = input_data.get("exec_feedback", [])
 
         # Parse UC name for naming convention
         parts = uc_name.split("_", 1)
@@ -117,6 +118,7 @@ class SimulatorSetupAgent:
             responses = await self._generate_responses(
                 node_name, node_def, node_commands,
                 mop_data, command_outputs, uc_name, model,
+                exec_feedback=exec_feedback,
             )
 
             # Build MockWire config YAML
@@ -186,6 +188,7 @@ class SimulatorSetupAgent:
         command_outputs: dict,
         uc_name: str,
         model: str,
+        exec_feedback: list[dict] | None = None,
     ) -> dict[str, str]:
         """Use LLM to generate realistic mock responses for each command."""
         cmd_parts = []
@@ -232,8 +235,22 @@ class SimulatorSetupAgent:
             "- For show/display commands, respond with realistic telecom output using concrete values\n"
             "- For sha256sum commands, respond with a 64-char hex hash\n"
             "- Keep responses concise (1-5 lines typically)\n\n"
-            "Return ONLY a valid JSON object, no markdown."
         )
+
+        # Add execution failure feedback from previous Step 9 run
+        if exec_feedback:
+            feedback_text = json.dumps(exec_feedback, indent=2, default=str)[:3000]
+            prompt += (
+                "=== PREVIOUS EXECUTION FAILURES (fix these!) ===\n"
+                "The following commands FAILED in the previous execution run.\n"
+                "Your responses MUST fix these failures — generate responses that:\n"
+                "1. Match the register regex patterns so variables are captured\n"
+                "2. Satisfy the validation criteria so the step passes\n"
+                "3. Contain realistic values that the validation expression expects\n\n"
+                f"{feedback_text}\n\n"
+            )
+
+        prompt += "Return ONLY a valid JSON object, no markdown."
 
         try:
             response = await call_llm(
