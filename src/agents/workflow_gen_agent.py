@@ -465,6 +465,9 @@ def _fix_workflow_yaml(yaml_text: str) -> str:
 
     yaml_text = re.sub(r'"((?:[^"\\]|\\.)*)"', _fix_double_quoted_regex, yaml_text)
 
+    # Fix for_each steps missing 'node' — Java JAR requires it on every step
+    yaml_text = _fix_missing_node_in_steps(yaml_text)
+
     # Strip invalid register item properties that the Java model doesn't recognize
     yaml_text = _strip_invalid_register_fields(yaml_text)
 
@@ -472,6 +475,77 @@ def _fix_workflow_yaml(yaml_text: str) -> str:
     # Convert (?<SOME_NAME>...) → (?<someName>...)
     yaml_text = _fix_regex_group_names(yaml_text)
 
+    return yaml_text
+
+
+def _find_node_in_steps(steps: list) -> str | None:
+    """Recursively find the first 'node' value in a list of steps."""
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        if step.get("node"):
+            return step["node"]
+        nested = step.get("steps", [])
+        if isinstance(nested, list):
+            found = _find_node_in_steps(nested)
+            if found:
+                return found
+    return None
+
+
+def _fix_missing_node_in_steps(yaml_text: str) -> str:
+    """Inject 'node' into for_each/wrapper steps that are missing it.
+
+    The Java JAR requires every step to have a 'node' field, including
+    for_each wrapper steps. If missing, inherit from nested steps or
+    fall back to 'target_node'.
+    """
+    from ruamel.yaml import YAML
+    try:
+        yaml = YAML()
+        yaml.preserve_quotes = True
+        data = yaml.load(StringIO(yaml_text))
+        if not isinstance(data, dict):
+            return yaml_text
+
+        phases = data.get("phases", {})
+        if not isinstance(phases, dict):
+            return yaml_text
+
+        # Determine default node from the 'nodes' section
+        nodes_section = data.get("nodes", {})
+        default_node = next(iter(nodes_section), "target_node") if isinstance(nodes_section, dict) else "target_node"
+
+        changed = False
+
+        def _fix_steps(steps: list):
+            nonlocal changed
+            for step in steps:
+                if not isinstance(step, dict):
+                    continue
+                # Recurse into nested steps first
+                nested = step.get("steps", [])
+                if isinstance(nested, list):
+                    _fix_steps(nested)
+                # If step has no 'node', inject one
+                if not step.get("node"):
+                    inherited = _find_node_in_steps(nested) if isinstance(nested, list) else None
+                    step["node"] = inherited or default_node
+                    changed = True
+                    logger.info("Injected node='%s' into step missing node field", step["node"])
+
+        for pdef in phases.values():
+            if isinstance(pdef, dict):
+                steps = pdef.get("steps", [])
+                if isinstance(steps, list):
+                    _fix_steps(steps)
+
+        if changed:
+            out = StringIO()
+            yaml.dump(data, out)
+            return out.getvalue()
+    except Exception as e:
+        logger.warning("Failed to fix missing node in steps: %s", e)
     return yaml_text
 
 
