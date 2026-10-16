@@ -466,6 +466,9 @@ def _fix_workflow_yaml(yaml_text: str) -> str:
 
     yaml_text = re.sub(r'"((?:[^"\\]|\\.)*)"', _fix_double_quoted_regex, yaml_text)
 
+    # Fix for_each at phase level — move into a wrapper step
+    yaml_text = _fix_for_each_at_phase_level(yaml_text)
+
     # Fix for_each steps missing 'node' — Java JAR requires it on every step
     yaml_text = _fix_missing_node_in_steps(yaml_text)
 
@@ -498,6 +501,59 @@ def _fix_boolean_operators(yaml_text: str) -> str:
 
     yaml_text = re.sub(r"expr:\s*'([^']*)'", _fix_expr, yaml_text)
     yaml_text = re.sub(r'expr:\s*"([^"]*)"', lambda m: f'expr: \'{m.group(1)}\'', yaml_text)
+    return yaml_text
+
+
+def _fix_for_each_at_phase_level(yaml_text: str) -> str:
+    """Move for_each/item_var from phase level into a wrapper step.
+
+    PhaseBlockDefinition only supports name, on_failure, when, steps.
+    If for_each is on the phase, wrap all steps in a for_each step.
+    """
+    from ruamel.yaml import YAML
+    try:
+        yaml = YAML()
+        yaml.preserve_quotes = True
+        data = yaml.load(StringIO(yaml_text))
+        if not isinstance(data, dict):
+            return yaml_text
+
+        phases = data.get("phases", {})
+        if not isinstance(phases, dict):
+            return yaml_text
+
+        changed = False
+        for pname, pdef in phases.items():
+            if not isinstance(pdef, dict):
+                continue
+            if "for_each" not in pdef:
+                continue
+
+            # Extract for_each fields from phase
+            for_each = pdef.pop("for_each")
+            item_var = pdef.pop("item_var", "currentItem")
+            max_iter = pdef.pop("max_iterations", None)
+            original_steps = pdef.get("steps", [])
+
+            # Wrap in a for_each step
+            wrapper = {
+                "for_each": for_each,
+                "item_var": item_var,
+                "steps": original_steps,
+            }
+            if max_iter is not None:
+                wrapper["max_iterations"] = max_iter
+
+            pdef["steps"] = [wrapper]
+            changed = True
+            logger.info("Moved for_each from phase '%s' into wrapper step", pname)
+
+        if changed:
+            out = StringIO()
+            yaml.dump(data, out)
+            return out.getvalue()
+    except Exception as e:
+        logger.warning("Failed to fix for_each at phase level: %s", e)
     return yaml_text
 
 
@@ -676,6 +732,19 @@ def _validate_workflow_structure(yaml_text: str) -> list[str]:
         errors.append("Missing 'phases' section")
     elif isinstance(phases, list):
         errors.append("'phases' must be a map (key: value), not a list. Use phase_name: { steps: [...] }")
+
+    # Validate phase-level fields
+    VALID_PHASE_FIELDS = {"name", "on_failure", "when", "steps"}
+    if isinstance(phases, dict):
+        for pname, pdef in phases.items():
+            if isinstance(pdef, dict):
+                bad_phase_keys = set(pdef.keys()) - VALID_PHASE_FIELDS
+                if bad_phase_keys:
+                    errors.append(
+                        f"Phase '{pname}' has invalid fields {bad_phase_keys}. "
+                        f"Only {VALID_PHASE_FIELDS} are allowed on phases. "
+                        f"'for_each'/'item_var' belong inside a step, not on the phase."
+                    )
 
     # Count total steps and validate step fields
     VALID_STEP_FIELDS = {
