@@ -242,6 +242,7 @@ class TestExecutor:
         sim_dir = run_dir / "simulator"
         manifest_path = sim_dir / "simulator_manifest.yaml"
         node_port_map: dict[str, int] = {}  # node_name → simulator port
+        logger.info("Looking for simulator manifest: %s (exists=%s)", manifest_path, manifest_path.exists())
 
         if manifest_path.exists():
             ryaml = RuamelYAML()
@@ -298,8 +299,11 @@ class TestExecutor:
                 await asyncio.sleep(3)
 
         # ── Patch workflow SSH hosts to point to localhost:<sim_port> ──
+        logger.info("Node-port map for simulator: %s", node_port_map)
         if node_port_map:
             self._patch_workflow_hosts(workflow_path, node_port_map)
+        else:
+            logger.warning("No simulator instances found — workflow hosts will NOT be patched")
 
         # Build execution command
         cmd = [
@@ -494,14 +498,17 @@ class TestExecutor:
             if isinstance(ssh, dict):
                 ssh["host"] = "localhost"
                 ssh["port"] = port
-                # Set default test credentials for simulator
-                ssh["user"] = ssh.get("user", "automation-user")
+                # Override credentials — workflow may have unresolved placeholders
+                # like ${node_user} / ${SECRET.node_password}
+                ssh["user"] = "automation-user"
                 auth = ssh.get("auth", {})
                 if isinstance(auth, dict):
-                    auth["password"] = auth.get("password", "automation-pass")
-                    ssh["auth"] = auth
+                    auth["password"] = "automation-pass"
+                else:
+                    ssh["auth"] = {"password": "automation-pass"}
                 patched = True
-                logger.info("Patched workflow node %s → localhost:%d", node_name, port)
+                logger.info("Patched workflow node %s → localhost:%d (user=automation-user)",
+                            node_name, port)
 
         if patched:
             with open(str(workflow_path), "w", encoding="utf-8") as f:
