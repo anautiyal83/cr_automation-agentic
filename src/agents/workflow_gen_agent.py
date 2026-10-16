@@ -469,6 +469,32 @@ def _fix_workflow_yaml(yaml_text: str) -> str:
     # Fix trailing whitespace
     yaml_text = "\n".join(line.rstrip() for line in yaml_text.split("\n"))
 
+    # Quote unquoted values that contain colons (common LLM issue)
+    # Matches lines like "    message: some text with Queries: ${var}"
+    # where the value part has an unquoted colon that breaks YAML parsing
+    def _quote_colon_values(line: str) -> str:
+        # Skip lines that are already quoted or are comments
+        stripped = line.lstrip()
+        if not stripped or stripped.startswith("#"):
+            return line
+        # Match key: value where value is unquoted and contains a colon
+        m = re.match(r'^(\s*\w[\w\s]*?:\s+)(.+)$', line)
+        if m:
+            indent_key = m.group(1)
+            value = m.group(2)
+            # Skip if already quoted
+            if value.startswith(("'", '"', "|", ">", "[", "{")):
+                return line
+            # Check if value contains an unquoted colon (not ${...} refs)
+            val_no_refs = re.sub(r'\$\{[^}]*\}', '', value)
+            if ':' in val_no_refs:
+                # Quote with single quotes, escaping existing single quotes
+                value = "'" + value.replace("'", "''") + "'"
+                return indent_key + value
+        return line
+
+    yaml_text = "\n".join(_quote_colon_values(l) for l in yaml_text.split("\n"))
+
     # Fix invalid escape sequences in double-quoted strings
     # YAML double quotes only allow specific escapes (\n \t \\ \" etc.)
     # LLM often uses regex escapes like \$ \( \) \| which are invalid in YAML double quotes
