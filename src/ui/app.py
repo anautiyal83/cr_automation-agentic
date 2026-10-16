@@ -261,7 +261,7 @@ html, body { margin: 0 !important; height: 100vh; overflow: hidden; }
 * { box-sizing: border-box; }
 .nicegui-content { padding: 48px 0 0 0 !important; height: 100vh; overflow: hidden; }
 .q-page-container { padding-top: 48px !important; height: calc(100vh - 48px); overflow: hidden; }
-.q-page { min-height: 0 !important; padding: 0 !important; height: 100%; overflow: hidden; }
+.q-page { min-height: 0 !important; padding: 0 !important; height: 100%; }
 /* --- Sidebar --- */
 .cr-sidebar {
     background: var(--cr-surface) !important;
@@ -317,26 +317,15 @@ html, body { margin: 0 !important; height: 100vh; overflow: hidden; }
     margin-left: 160px;
     padding: 6px 10px;
     height: calc(100vh - 48px);
-    min-height: calc(100vh - 48px);
-    max-height: calc(100vh - 48px);
     overflow-y: auto;
     overflow-x: hidden;
-    display: flex;
-    flex-direction: column;
-}
-.cr-content > div {
-    width: 100%;
-    flex: 1 1 auto;
-    min-height: 0;
 }
 .cr-content::-webkit-scrollbar { width: 6px; }
 .cr-content::-webkit-scrollbar-thumb { background: var(--cr-border); border-radius: 3px; }
 .cr-content::-webkit-scrollbar-track { background: transparent; }
 /* Let section cards fill width and not constrain height */
-.cr-section { overflow: visible !important; width: 100% !important; flex: 1 1 auto; }
+.cr-section { overflow: visible !important; width: 100% !important; }
 .cr-section > .q-card__section { overflow: visible !important; width: 100% !important; }
-/* Prevent content panels from collapsing or jumping */
-.cr-content > .nicegui-column { flex: 1 1 0; min-height: 0; }
 /* Tables fill width */
 .cr-content .q-table { width: 100% !important; }
 .cr-content .q-table__container { width: 100% !important; }
