@@ -212,14 +212,14 @@ class WorkflowGenAgent:
             "        send: hostname\n"
             "        on_failure: stop\n"
             "        register:\n"
-            "          - regex: '(?<HOSTNAME>\\S+)'\n"
+            "          - regex: '(?<hostName>\\S+)'\n"
             "        validation:\n"
             "          enabled: true\n"
             "          description: Verify SSH connectivity\n"
             "          success:\n"
             "            criteria:\n"
-            "              expr: '${HOSTNAME != \"\"}'\n"
-            "            message: Connected to ${HOSTNAME}\n"
+            "              expr: '${hostName != \"\"}'\n"
+            "            message: Connected to ${hostName}\n"
             "          failure:\n"
             "            message: Failed to connect\n"
             "      - node: target_node\n"
@@ -227,7 +227,7 @@ class WorkflowGenAgent:
             "        send: 'alarm_cli --list critical'\n"
             "        on_failure: continue\n"
             "        register:\n"
-            "          - regex: '(?<ALARM_COUNT>\\d+) alarm'\n"
+            "          - regex: '(?<alarmCount>\\d+) alarm'\n"
             "  backup:\n"
             "    name: Configuration Backup\n"
             "    steps:\n"
@@ -243,12 +243,12 @@ class WorkflowGenAgent:
             "        send: 'config apply ${ACTIVITY_ID}'\n"
             "        on_failure: stop\n"
             "        register:\n"
-            "          - regex: '(?<APPLY_RESULT>SUCCESS|FAILED)'\n"
+            "          - regex: '(?<applyResult>SUCCESS|FAILED)'\n"
             "        validation:\n"
             "          enabled: true\n"
             "          success:\n"
             "            criteria:\n"
-            "              expr: '${APPLY_RESULT == \"SUCCESS\"}'\n"
+            "              expr: '${applyResult == \"SUCCESS\"}'\n"
             "            message: Configuration applied successfully\n"
             "          failure:\n"
             "            message: Configuration apply failed\n\n"
@@ -308,22 +308,22 @@ class WorkflowGenAgent:
             "    send: hostname\n"
             "    on_failure: stop\n"
             "    register:\n"
-            "      - regex: '(?<HOSTNAME>\\S+)'\n"
+            "      - regex: '(?<hostName>\\S+)'\n"
             "    validation:\n"
             "      enabled: true\n"
             "      description: Verify connectivity\n"
             "      success:\n"
             "        criteria:\n"
-            "          expr: '${HOSTNAME != \"\"}'\n"
+            "          expr: '${hostName != \"\"}'\n"
             "        message: Connected successfully\n"
             "      failure:\n"
             "        message: Failed to connect\n\n"
 
             "REGISTER: must be a LIST of items with regex or name/value:\n"
             "  register:\n"
-            "    - regex: '(?<VAR_NAME>pattern)'\n"
-            "    - name: DERIVED\n"
-            "      value: '${SOME_VAR}'\n"
+            "    - regex: '(?<varName>pattern)'\n"
+            "    - name: derivedVar\n"
+            "      value: '${someVar}'\n"
             "WRONG register formats: register: {name: regex} or register: name: regex\n\n"
 
             "VALIDATION: must be a single OBJECT (not a list):\n"
@@ -353,7 +353,9 @@ class WorkflowGenAgent:
             "=== CRITICAL ===\n"
             "- Generate AT LEAST 15-20 steps total across all phases\n"
             "- Map EVERY MOP procedure step — do not skip or summarize\n"
-            "- Use register with (?<NAMED_GROUP>...) regex for every step that captures output\n"
+            "- Use register with (?<namedGroup>...) regex for every step that captures output\n"
+            "- CRITICAL: Java regex named groups MUST use camelCase with NO underscores: (?<hostName>...), (?<alarmCount>...), (?<systemStatus>...)\n"
+            "  WRONG: (?<CRITICAL_ALARMS>...) (?<SYSTEM_STATUS>...) — underscores are NOT allowed in Java 8 regex group names\n"
             "- Use validation: { enabled: true, success: { criteria: { expr: ... } } } format\n"
             "- phases MUST be a MAP (key: value), NOT a list\n"
             "- Steps MUST NOT have 'id' field — use command_description instead\n"
@@ -456,6 +458,45 @@ def _fix_workflow_yaml(yaml_text: str) -> str:
 
     # Strip invalid register item properties that the Java model doesn't recognize
     yaml_text = _strip_invalid_register_fields(yaml_text)
+
+    # Fix Java 8 regex named group names — underscores not allowed
+    # Convert (?<SOME_NAME>...) → (?<someName>...)
+    yaml_text = _fix_regex_group_names(yaml_text)
+
+    return yaml_text
+
+
+def _fix_regex_group_names(yaml_text: str) -> str:
+    """Convert underscored regex group names to camelCase for Java 8 compatibility.
+
+    Java 8 regex named groups only allow [a-zA-Z][a-zA-Z0-9]* — no underscores.
+    (?<SOME_NAME>...) → (?<someName>...)
+    Also fixes all ${SOME_NAME} variable references to match.
+    """
+    # Find all named groups with underscores
+    group_pattern = re.compile(r'\(\?<([a-zA-Z]\w*?)>')
+    names_to_fix = set()
+    for m in group_pattern.finditer(yaml_text):
+        name = m.group(1)
+        if '_' in name:
+            names_to_fix.add(name)
+
+    if not names_to_fix:
+        return yaml_text
+
+    def _to_camel(name: str) -> str:
+        parts = name.lower().split('_')
+        return parts[0] + ''.join(p.capitalize() for p in parts[1:])
+
+    for old_name in names_to_fix:
+        new_name = _to_camel(old_name)
+        # Replace in regex group definitions: (?<OLD_NAME> → (?<newName>
+        yaml_text = yaml_text.replace(f'(?<{old_name}>', f'(?<{new_name}>')
+        # Replace in variable references: ${OLD_NAME} and ${OLD_NAME
+        yaml_text = yaml_text.replace(f'${{{old_name}}}', f'${{{new_name}}}')
+        yaml_text = yaml_text.replace(f'${{{old_name} ', f'${{{new_name} ')
+        yaml_text = yaml_text.replace(f'${{{old_name}.', f'${{{new_name}.')
+        logger.info("Fixed regex group name: %s → %s", old_name, new_name)
 
     return yaml_text
 
