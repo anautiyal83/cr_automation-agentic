@@ -83,6 +83,10 @@ class SettingsSection:
         if val:
             self.cli_jar.value = val
 
+        val = await self._load_setting("execution_report_jar")
+        if val:
+            self.exec_report_jar.value = val
+
         val = await self._load_setting("simulator_endpoint")
         if val:
             self.sim_endpoint.value = val
@@ -246,10 +250,16 @@ class SettingsSection:
                 with ui.card().classes("w-full p-5 cr-card-inner"):
                     with ui.column().classes("w-full gap-3"):
                         self.ciq_jar = ui.input(
-                            "CIQ Processor JAR", value="./lib/ciq-processor.jar",
+                            "CIQ Processor JAR",
+                            placeholder="./lib/ciq-processor.jar",
                         ).classes("w-full").props("outlined dense")
                         self.cli_jar = ui.input(
-                            "CLI Automation JAR", value="./lib/cli-automation-standalone.jar",
+                            "CLI Automation JAR",
+                            placeholder="./lib/cli-automation-standalone.jar",
+                        ).classes("w-full").props("outlined dense")
+                        self.exec_report_jar = ui.input(
+                            "Execution Report Generator JAR",
+                            placeholder="./lib/execution-report-generator.jar",
                         ).classes("w-full").props("outlined dense")
 
                 self._card_header("HTML Report Templates", "article",
@@ -306,6 +316,7 @@ class SettingsSection:
         await self._save_setting("backoff_multiplier", str(float(self.backoff.value)))
         await self._save_setting("ciq_processor_jar", self.ciq_jar.value or "")
         await self._save_setting("cli_automation_jar", self.cli_jar.value or "")
+        await self._save_setting("execution_report_jar", self.exec_report_jar.value or "")
         await self._save_setting("simulator_endpoint", self.sim_endpoint.value or "")
         await self._save_setting("simulator_folder", self.sim_folder.value or "")
         await self._save_setting("api_key", self.api_key_input.value or "")
@@ -328,6 +339,7 @@ class SettingsSection:
                 "infra_retry_backoff": float(self.backoff.value),
                 "ciq_processor_jar": self.ciq_jar.value,
                 "cli_automation_jar": self.cli_jar.value,
+                "execution_report_jar": self.exec_report_jar.value,
                 "mop_template": self.mop_template.value,
                 "exec_summary_template": self.exec_summary_template.value,
                 "exec_failure_template": self.exec_failure_template.value,

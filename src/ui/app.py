@@ -363,6 +363,8 @@ async def _load_config(db):
             updates["ciq_processor_jar"] = db_settings["ciq_processor_jar"]
         if db_settings.get("cli_automation_jar"):
             updates["cli_automation_jar"] = db_settings["cli_automation_jar"]
+        if db_settings.get("execution_report_jar"):
+            updates["execution_report_jar"] = db_settings["execution_report_jar"]
         if db_settings.get("mop_template"):
             updates["mop_template"] = db_settings["mop_template"]
         if db_settings.get("exec_summary_template"):

@@ -73,6 +73,7 @@ class PipelineConfiguration(BaseModel):
     simulator_port: int = 8080
     ciq_processor_jar: str = "./lib/ciq-processor.jar"
     cli_automation_jar: str = "./lib/cli-automation-standalone.jar"
+    execution_report_jar: str = "./lib/execution-report-generator.jar"
     mop_template: str = "./lib/templates/mop_summary_report_template_v2.html"
     exec_summary_template: str = "./lib/templates/mop_execution_summary_report_template.html"
     exec_failure_template: str = "./lib/templates/execution_failure_template.html"
@@ -173,6 +174,8 @@ class ConfigManager:
             flat["ciq_processor_jar"] = ext["ciq_processor_jar"]
         if "cli_automation_jar" in ext:
             flat["cli_automation_jar"] = ext["cli_automation_jar"]
+        if "execution_report_jar" in ext:
+            flat["execution_report_jar"] = ext["execution_report_jar"]
 
         storage = raw.get("storage", {})
         if "artifacts_directory" in storage:

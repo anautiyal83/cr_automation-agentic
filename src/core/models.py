@@ -171,6 +171,7 @@ class PipelineConfiguration(BaseModel):
     simulator_port: int = 8080
     ciq_processor_jar: str = "./lib/ciq-processor.jar"
     cli_automation_jar: str = "./lib/cli-automation-standalone.jar"
+    execution_report_jar: str = "./lib/execution-report-generator.jar"
     output_directory: str = "./data/runs"
     database_path: str = "./data/pipeline.db"
     knowledge_base_directory: str = "./data/knowledge"

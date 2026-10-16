@@ -265,11 +265,69 @@ class TestExecutor:
         except Exception as e:
             failures.append({"test": "workflow_execution", "error": str(e)})
 
+        # ── Generate execution report via execution-report-generator JAR ──
+        report_html = ""
+        summary_html = ""
+        report_jar = self._get_config(config, "execution_report_jar")
+        if report_jar and Path(report_jar).exists():
+            node_type, activity = self._parse_uc_name(uc_name)
+            report_dir = run_dir / "exec_report"
+            report_dir.mkdir(exist_ok=True)
+
+            report_cmd = [
+                "java", "-jar", report_jar,
+                "--node-type", node_type,
+                "--activity", activity,
+                "--cr-group", first_cr,
+                "--json-dir", str(exec_output_dir),
+                "--output-html-path", str(report_dir),
+                "--output-html-name", f"{uc_name}_execution-report.html",
+                "--output-summary-name", f"{uc_name}_execution-summary.html",
+                "--request-id", first_cr,
+            ]
+
+            # Use custom templates from config if available
+            exec_summary_tpl = self._get_config(config, "exec_summary_template")
+            if exec_summary_tpl and Path(exec_summary_tpl).exists():
+                report_cmd.extend(["--summary-template", exec_summary_tpl])
+            exec_failure_tpl = self._get_config(config, "exec_failure_template")
+            if exec_failure_tpl and Path(exec_failure_tpl).exists():
+                report_cmd.extend(["--template", exec_failure_tpl])
+
+            try:
+                rpt_result = await asyncio.to_thread(
+                    subprocess.run, report_cmd,
+                    capture_output=True, text=True, timeout=timeout,
+                )
+                results["report_generation"] = {
+                    "returncode": rpt_result.returncode,
+                    "stdout": rpt_result.stdout,
+                    "stderr": rpt_result.stderr,
+                }
+                if rpt_result.returncode == 0:
+                    report_html = str(report_dir / f"{uc_name}_execution-report.html")
+                    summary_html = str(report_dir / f"{uc_name}_execution-summary.html")
+                else:
+                    logger.warning("Execution report generation failed: %s",
+                                   (rpt_result.stderr or rpt_result.stdout)[:500])
+            except subprocess.TimeoutExpired:
+                logger.warning("Execution report generation timed out after %ds", timeout)
+            except Exception as e:
+                logger.warning("Execution report generation error: %s", e)
+        else:
+            logger.info("Skipping execution report generation — JAR not found: %s", report_jar)
+
         status = "failed" if failures else "passed"
+        output_data: dict[str, Any] = {"results": results, "artifacts": artifacts}
+        if report_html:
+            output_data["report_html"] = report_html
+        if summary_html:
+            output_data["summary_html"] = summary_html
+
         return StepOutput(
             status=status,
             error={"test_failures": failures} if failures else None,
-            output_data={"results": results, "artifacts": artifacts},
+            output_data=output_data,
         )
 
     @staticmethod

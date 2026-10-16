@@ -18,6 +18,7 @@ retry:
 external_modules:
   ciq_processor_jar: "./lib/ciq-processor.jar"
   cli_automation_jar: "./lib/cli-automation-standalone.jar"
+  execution_report_jar: "./lib/execution-report-generator.jar"
   java_home: null
   subprocess_timeout: 300
 
