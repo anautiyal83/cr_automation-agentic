@@ -368,6 +368,7 @@ class WorkflowGenAgent:
             "- Use validation: { enabled: true, success: { criteria: { expr: ... } } } format\n"
             "- phases MUST be a MAP (key: value), NOT a list\n"
             "- Steps MUST NOT have 'id' field — use command_description instead\n"
+            "- Use && and || for boolean operators in expr (NOT 'and'/'or' — Java expression engine)\n"
             "- Use 2-space indentation consistently, NO tabs\n"
             "- Quote strings with special chars: colons, braces, brackets, #\n"
             "- Multi-line send commands use YAML literal block: send: |\n"
@@ -475,6 +476,28 @@ def _fix_workflow_yaml(yaml_text: str) -> str:
     # Convert (?<SOME_NAME>...) → (?<someName>...)
     yaml_text = _fix_regex_group_names(yaml_text)
 
+    # Fix boolean operators in validation expressions: 'and' → '&&', 'or' → '||'
+    yaml_text = _fix_boolean_operators(yaml_text)
+
+    return yaml_text
+
+
+def _fix_boolean_operators(yaml_text: str) -> str:
+    """Fix Python-style boolean operators in validation expr fields.
+
+    The Java expression engine uses && and || but LLM often generates
+    'and' and 'or'. Replace only within expr: '...' contexts.
+    """
+    # Match expr values in single or double quotes
+    def _fix_expr(m):
+        expr = m.group(1)
+        # Replace word-boundary 'and'/'or' with &&/||
+        expr = re.sub(r'\band\b', '&&', expr)
+        expr = re.sub(r'\bor\b', '||', expr)
+        return f"expr: '{expr}'"
+
+    yaml_text = re.sub(r"expr:\s*'([^']*)'", _fix_expr, yaml_text)
+    yaml_text = re.sub(r'expr:\s*"([^"]*)"', lambda m: f'expr: \'{m.group(1)}\'', yaml_text)
     return yaml_text
 
 
