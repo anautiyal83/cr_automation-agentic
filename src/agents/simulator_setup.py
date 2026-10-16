@@ -414,6 +414,10 @@ def _build_mockwire_config(
             key = f"{key} # {safe_desc}"
         used_keys.add(key)
 
+        # Quote the key for YAML safety — colons in regex patterns break YAML parsing
+        from ruamel.yaml.scalarstring import DoubleQuotedScalarString
+        key = DoubleQuotedScalarString(key)
+
         # Store response
         if len(response_text) > 200 or "\n" in response_text:
             # Build short filename from description or command
