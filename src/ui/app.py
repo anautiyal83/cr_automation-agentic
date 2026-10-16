@@ -338,9 +338,10 @@ html, body { margin: 0 !important; height: 100vh; overflow: hidden; }
 /* Let section cards fill width and not constrain height */
 .cr-section { overflow: visible !important; width: 100% !important; }
 .cr-section > .q-card__section { overflow: visible !important; width: 100% !important; }
-/* Force all NiceGUI containers inside content to use full width */
+/* Force all NiceGUI containers inside content to use full width, no clipping */
 .cr-content .nicegui-column, .cr-content .nicegui-row { max-width: 100% !important; }
-.cr-content .q-card { max-width: 100% !important; }
+.cr-content .q-card { max-width: 100% !important; overflow: visible !important; }
+.cr-content .q-card__section { overflow: visible !important; }
 /* Tables fill width */
 .cr-content .q-table { width: 100% !important; }
 .cr-content .q-table__container { width: 100% !important; }
