@@ -82,7 +82,7 @@ class ProgressSection:
             self.progress_bar.set_visibility(False)
 
             # Step tracker — single-row compact timeline
-            with ui.row().classes("w-full gap-0 justify-center py-1"):
+            with ui.row().classes("w-full gap-0 justify-between py-1 px-2"):
                 for i in range(1, 11):
                     self._step_widget(i)
                     if i < 10:
@@ -135,9 +135,10 @@ class ProgressSection:
 
     # Short names for compact single-row display
     _SHORT_NAMES = {
-        1: "Doc Parse", 2: "UC Analyze", 3: "Val Rules", 4: "JSON Gen",
-        5: "CIQ Test", 6: "Workflow", 7: "MOP Test", 8: "Sim Config",
-        9: "Exec Test", 10: "Report",
+        1: "DOC Parser", 2: "DOC Analyzer", 3: "CIQ Config Gen",
+        4: "CIQ JSON Config", 5: "QA-CIQ Validation", 6: "Execution Config",
+        7: "QA-MOP Gen", 8: "Simulator Setup", 9: "QA-MOP Exec",
+        10: "Final Report",
     }
 
     def _step_widget(self, step_num: int):
@@ -152,10 +153,11 @@ class ProgressSection:
             # Step label
             label = ui.label(f"{step_num}").classes("text-[9px] cr-text-dim font-semibold")
             name = ui.label(self._SHORT_NAMES.get(step_num, "")) \
-                .classes("text-[8px] cr-text-dim text-center") \
-                .style("white-space: nowrap")
+                .classes("text-[9px] cr-text-dim text-center") \
+                .style("white-space: nowrap; overflow: visible")
             status_label = ui.label("pending") \
-                .classes("text-[8px] cr-text-dim")
+                .classes("text-[9px] cr-text-dim") \
+                .style("white-space: nowrap")
 
             self.step_widgets[step_num] = {
                 "col": col, "icon_container": icon_container, "step_icon": step_icon,
