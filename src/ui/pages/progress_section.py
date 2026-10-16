@@ -291,9 +291,25 @@ class ProgressSection:
         self.banner.style(replace=(
             "background: rgba(108,99,255,0.08); border: 1px solid rgba(108,99,255,0.3)"
         ))
-        # Reset all steps
+        # Reset all steps to pending first
         for i in range(1, TOTAL_STEPS + 1):
             self._update_step_visual(i, "pending")
+
+        # Restore already-completed steps from DB
+        if self.orchestrator and self.orchestrator.db:
+            try:
+                step_rows = await self.orchestrator.db.execute(
+                    "SELECT step_number, status FROM step_results WHERE run_id = ? ORDER BY step_number",
+                    (str(run_id),)
+                )
+                for sr in step_rows:
+                    sn = sr.get("step_number", 0)
+                    ss = str(sr.get("status", "pending")).replace("StepStatus.", "").lower()
+                    if sn and sn in self.step_widgets:
+                        self._update_step_visual(sn, ss)
+            except Exception:
+                pass
+
         event_bus.subscribe(self._on_event, run_id)
 
     async def _on_event(self, event: PipelineEvent):
