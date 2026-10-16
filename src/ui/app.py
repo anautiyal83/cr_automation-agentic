@@ -316,6 +316,8 @@ html, body { margin: 0 !important; height: 100vh; overflow: hidden; }
 .cr-content {
     margin-left: 160px;
     padding: 6px 10px;
+    width: calc(100vw - 160px);
+    max-width: calc(100vw - 160px);
     height: calc(100vh - 48px);
     overflow-y: auto;
     overflow-x: hidden;
