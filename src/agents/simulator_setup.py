@@ -188,10 +188,25 @@ class SimulatorSetupAgent:
         model: str,
     ) -> dict[str, str]:
         """Use LLM to generate realistic mock responses for each command."""
-        cmd_list = "\n".join(
-            f"  {i+1}. [{c.get('phase','')}] {c.get('send','')}"
-            for i, c in enumerate(commands)
-        )
+        cmd_parts = []
+        for i, c in enumerate(commands):
+            line = f"  {i+1}. [{c.get('phase','')}] {c.get('send','')}"
+            # Include register patterns so responses match them
+            regs = c.get("register", [])
+            if regs and isinstance(regs, list):
+                patterns = [r.get("regex", "") for r in regs if isinstance(r, dict) and r.get("regex")]
+                if patterns:
+                    line += f"\n     Register patterns: {patterns}"
+            # Include validation success message for context
+            val = c.get("validation", {})
+            if isinstance(val, dict):
+                success = val.get("success", {})
+                if isinstance(success, dict):
+                    expr = success.get("criteria", {}).get("expr", "") if isinstance(success.get("criteria"), dict) else ""
+                    if expr:
+                        line += f"\n     Validation expects: {expr}"
+            cmd_parts.append(line)
+        cmd_list = "\n".join(cmd_parts)
 
         prompt = (
             f"Generate realistic mock SSH responses for a Nokia telecom node.\n\n"
@@ -204,6 +219,9 @@ class SimulatorSetupAgent:
             "- key = the exact command string (copy it exactly, including newlines)\n"
             "- value = the mock response text (what the SSH server would return)\n\n"
             "CRITICAL RULES:\n"
+            "- Responses MUST match the register regex patterns listed above\n"
+            "  e.g. if register is '(?<systemStatus>\\w+)' after 'System Status:', response MUST contain 'System Status: Up'\n"
+            "  e.g. if validation expects '${alarmCount == \"0\"}', response must let alarmCount capture '0'\n"
             "- Responses must contain CONCRETE values only — NO ${var} placeholders\n"
             "- Use realistic sample values: real IPs (10.71.146.15), hostnames (DSR-APP-01), etc.\n"
             "- Response is ONLY what the server prints AFTER the command — do NOT echo the command back\n"
