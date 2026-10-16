@@ -135,9 +135,9 @@ class ProgressSection:
 
     # Short names for compact single-row display
     _SHORT_NAMES = {
-        1: "DOC Parser", 2: "DOC Analyzer", 3: "CIQ Config Gen",
-        4: "CIQ JSON Config", 5: "QA-CIQ Validation", 6: "Execution Config",
-        7: "QA-MOP Gen", 8: "Simulator Setup", 9: "QA-MOP Exec",
+        1: "DOC Parser", 2: "DOC Analyzer", 3: "CIQ Config Generation",
+        4: "Generate CIQ JSON Config", 5: "QA-Validation", 6: "Generate Execution Config",
+        7: "QA-MOP", 8: "Simulator Setup", 9: "QA-Execution",
         10: "Final Report",
     }
 
