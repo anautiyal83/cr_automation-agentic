@@ -266,8 +266,8 @@ html, body { margin: 0 !important; height: 100vh; overflow: hidden; }
 .cr-sidebar {
     background: var(--cr-surface) !important;
     border-right: 1px solid var(--cr-border);
-    width: 160px;
-    min-width: 160px;
+    width: 140px;
+    min-width: 140px;
     height: calc(100vh - 48px);
     max-height: calc(100vh - 48px);
     position: fixed;
@@ -314,10 +314,10 @@ html, body { margin: 0 !important; height: 100vh; overflow: hidden; }
     margin: 4px 12px;
 }
 .cr-content {
-    margin-left: 160px;
-    padding: 6px 10px;
-    width: calc(100vw - 160px);
-    max-width: calc(100vw - 160px);
+    margin-left: 140px;
+    padding: 6px 12px;
+    width: calc(100vw - 140px);
+    max-width: calc(100vw - 140px);
     height: calc(100vh - 48px);
     overflow-y: auto;
     overflow-x: hidden;
@@ -328,6 +328,9 @@ html, body { margin: 0 !important; height: 100vh; overflow: hidden; }
 /* Let section cards fill width and not constrain height */
 .cr-section { overflow: visible !important; width: 100% !important; }
 .cr-section > .q-card__section { overflow: visible !important; width: 100% !important; }
+/* Force all NiceGUI containers inside content to use full width */
+.cr-content .nicegui-column, .cr-content .nicegui-row { max-width: 100% !important; }
+.cr-content .q-card { max-width: 100% !important; }
 /* Tables fill width */
 .cr-content .q-table { width: 100% !important; }
 .cr-content .q-table__container { width: 100% !important; }
