@@ -225,29 +225,24 @@ body.body--light {
 .cr-bg-surface-light { background: var(--cr-surface-light) !important; }
 .cr-border { border-color: var(--cr-border) !important; }
 .cr-step-circle {
-    width: 36px; height: 36px; border-radius: 50%;
+    width: 28px; height: 28px; border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
     background: var(--cr-surface-light); border: 2px solid var(--cr-border);
     transition: all 0.3s ease;
 }
 .cr-step-circle-active { background: rgba(108,99,255,0.15); }
 .cr-step-connector {
-    flex-shrink: 0; display: flex; align-items: center; margin-top: 16px;
+    flex-shrink: 0; display: flex; align-items: center; margin-top: 12px;
 }
 .cr-step-connector::before {
-    content: ''; display: block; width: 16px; height: 2px;
+    content: ''; display: block; width: 10px; height: 2px;
     background: var(--cr-border); transition: background 0.3s;
 }
 .cr-step-connector::after {
     content: ''; display: block; width: 0; height: 0;
-    border-top: 5px solid transparent; border-bottom: 5px solid transparent;
-    border-left: 6px solid var(--cr-border); transition: border-color 0.3s;
+    border-top: 4px solid transparent; border-bottom: 4px solid transparent;
+    border-left: 5px solid var(--cr-border); transition: border-color 0.3s;
 }
-.cr-step-row-connector {
-    display: flex; align-items: center; justify-content: center;
-    padding: 2px 0; color: var(--cr-border);
-}
-.cr-step-row-connector svg { width: 20px; height: 20px; }
 .cr-card-inner {
     background: var(--cr-surface-light) !important;
     border: 1px solid var(--cr-border) !important;
@@ -274,9 +269,9 @@ body.body--light {
 /* Layout */
 html, body { margin: 0 !important; height: 100vh; overflow: hidden; }
 * { box-sizing: border-box; }
-.nicegui-content { padding: 48px 0 0 0 !important; height: 100vh; overflow: hidden; }
-.q-page-container { padding-top: 48px !important; height: calc(100vh - 48px); overflow: hidden; }
-.q-page { min-height: 0 !important; padding: 0 !important; height: 100%; }
+.nicegui-content { padding: 48px 0 0 0 !important; height: 100vh; }
+.q-page-container { padding-top: 48px !important; }
+.q-page { min-height: 0 !important; padding: 0 !important; }
 /* --- Sidebar --- */
 .cr-sidebar {
     background: var(--cr-surface) !important;

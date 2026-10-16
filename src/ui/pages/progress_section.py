@@ -81,34 +81,13 @@ class ProgressSection:
                 .props("color=deep-purple-6 stripe animate rounded size=8px")
             self.progress_bar.set_visibility(False)
 
-            # Step tracker — two-row timeline with arrow connectors
-            ROW1_STEPS = range(1, 6)   # Steps 1-5
-            ROW2_STEPS = range(6, 11)  # Steps 6-10
-
-            with ui.column().classes("w-full gap-0 py-2"):
-                # Row 1: Steps 1-5
-                with ui.row().classes("w-full gap-0 justify-center"):
-                    for i in ROW1_STEPS:
-                        self._step_widget(i)
-                        if i < 5:
-                            connector = ui.element("div").classes("cr-step-connector")
-                            self.step_widgets[i]["connector"] = connector
-
-                # Row connector arrow (↓)
-                with ui.row().classes("w-full justify-center cr-step-row-connector"):
-                    ui.html(
-                        '<svg viewBox="0 0 20 20" fill="currentColor">'
-                        '<path d="M10 2 L10 14 M5 10 L10 16 L15 10"/>'
-                        '</svg>'
-                    )
-
-                # Row 2: Steps 6-10
-                with ui.row().classes("w-full gap-0 justify-center"):
-                    for i in ROW2_STEPS:
-                        self._step_widget(i)
-                        if i < 10:
-                            connector = ui.element("div").classes("cr-step-connector")
-                            self.step_widgets[i]["connector"] = connector
+            # Step tracker — single-row compact timeline
+            with ui.row().classes("w-full gap-0 justify-center py-1"):
+                for i in range(1, 11):
+                    self._step_widget(i)
+                    if i < 10:
+                        connector = ui.element("div").classes("cr-step-connector")
+                        self.step_widgets[i]["connector"] = connector
 
             # Error / retry detail area
             self.detail_container = ui.column().classes("w-full")
@@ -155,22 +134,22 @@ class ProgressSection:
                     .props("unelevated color=teal-6 size=sm no-caps")
 
     def _step_widget(self, step_num: int):
-        with ui.column().classes("items-center gap-1 flex-shrink-0") \
-                .style("min-width: 70px; max-width: 90px") as col:
+        with ui.column().classes("items-center gap-0 flex-shrink-0") \
+                .style("min-width: 50px; max-width: 65px") as col:
             # Circle icon
             icon_container = ui.element("div").classes("cr-step-circle")
             with icon_container:
                 step_icon = ui.icon(
-                    STEP_ICONS.get(step_num, "circle"), size="18px"
+                    STEP_ICONS.get(step_num, "circle"), size="14px"
                 ).classes("cr-text-dim")
 
             # Step label
-            label = ui.label(f"Step {step_num}").classes("text-[10px] cr-text-dim font-semibold")
+            label = ui.label(f"{step_num}").classes("text-[9px] cr-text-dim font-semibold")
             name = ui.label(STEP_NAMES.get(step_num, "")) \
-                .classes("text-[9px] cr-text-dim text-center leading-tight") \
-                .style("max-width: 90px; word-wrap: break-word")
+                .classes("text-[8px] cr-text-dim text-center leading-tight") \
+                .style("max-width: 65px; word-wrap: break-word")
             status_label = ui.label("pending") \
-                .classes("text-[10px] cr-text-dim")
+                .classes("text-[8px] cr-text-dim")
 
             self.step_widgets[step_num] = {
                 "col": col, "icon_container": icon_container, "step_icon": step_icon,
