@@ -160,6 +160,22 @@ class WorkflowGenAgent:
                 "Fix the issues and regenerate."
             )
 
+        # Execution feedback from Step 9 failures
+        exec_feedback = input_data.get("exec_feedback", [])
+        exec_feedback_text = ""
+        if exec_feedback:
+            exec_feedback_text = (
+                "\n\n=== EXECUTION TEST FAILURES (from previous run) ===\n"
+                "The following commands failed during execution testing.\n"
+                "Fix the register regex patterns and validation expressions so they work correctly.\n"
+                "Common issues:\n"
+                "- Validation expr uses 'and'/'or' instead of '&&'/'||'\n"
+                "- Register regex doesn't match the actual command output format\n"
+                "- Validation checks values that the register can't capture\n"
+                "- Expression uses unsupported functions like Integer.parseInt()\n\n"
+                f"{json.dumps(exec_feedback, indent=2, default=str)[:3000]}\n"
+            )
+
         prompt = (
             f"Generate a COMPLETE cli-automation workflow YAML for UC: {uc_name}\n"
             f"Node Type: {node_type}, Activity: {activity}\n\n"
@@ -174,7 +190,7 @@ class WorkflowGenAgent:
 
             f"=== COMMAND OUTPUT SAMPLES (expected CLI responses) ===\n{cmd_summary}\n\n"
 
-            f"{few_shot_text}{retry_info}\n\n"
+            f"{few_shot_text}{retry_info}{exec_feedback_text}\n\n"
 
             "=== WORKING EXAMPLE (follow this EXACT structure) ===\n\n"
             "version: '1.2'\n"

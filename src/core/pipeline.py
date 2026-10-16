@@ -628,21 +628,23 @@ class PipelineOrchestrator:
                                 ))
                                 step_num = 5  # will increment to 6
                             elif step_num == 9:
-                                # Step 9 (exec test) rerun: go back to step 8 to re-generate
-                                # simulator config with exec failure feedback, then re-test.
-                                # Workflow stays — only simulator responses need fixing.
+                                # Step 9 (exec test) rerun: go back to step 6 to re-generate
+                                # workflow (fix validation exprs) + simulator config (fix responses).
+                                # Exec failures are fed as context to both Step 6 and Step 8.
+                                step_data.get("artifacts", {}).pop("workflow_yaml", None)
                                 step_data.get("artifacts", {}).pop("simulator_config_yaml", None)
+                                step_data.pop("mop_test_results", None)
                                 step_data.pop("exec_test_results", None)
                                 await self.db.execute_insert(
-                                    "DELETE FROM step_results WHERE run_id = ? AND step_number IN (8, 9)",
+                                    "DELETE FROM step_results WHERE run_id = ? AND step_number IN (6, 7, 8, 9)",
                                     (str(run.id),),
                                 )
                                 await event_bus.publish(PipelineEvent(
                                     run_id=run.id, event_type="retry_started",
-                                    step_number=8,
-                                    payload={"attempt": 1, "error": "User requested re-run from Step 9 — feeding exec failures to Step 8"},
+                                    step_number=6,
+                                    payload={"attempt": 1, "error": "User requested re-run from Step 9 — feeding exec failures to Steps 6 & 8"},
                                 ))
-                                step_num = 7  # will increment to 8
+                                step_num = 5  # will increment to 6
                             else:
                                 # LLM steps: re-run this step
                                 step_data.get("artifacts", {}).pop(ak, None)

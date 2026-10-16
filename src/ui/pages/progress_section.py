@@ -439,7 +439,7 @@ class ProgressSection:
         elif step_num == 7:
             self.ms_rerun_btn.text = "Re-run Steps 6-9"
         elif step_num == 9:
-            self.ms_rerun_btn.text = "Re-run Steps 8-9"
+            self.ms_rerun_btn.text = "Re-run Steps 6-9"
         else:
             self.ms_rerun_btn.text = "Re-run Step"
 
