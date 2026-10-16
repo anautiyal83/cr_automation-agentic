@@ -517,6 +517,9 @@ def _fix_workflow_yaml(yaml_text: str) -> str:
     # Strip invalid register item properties that the Java model doesn't recognize
     yaml_text = _strip_invalid_register_fields(yaml_text)
 
+    # Strip invalid fields from validation branches (success/failure/warning)
+    yaml_text = _strip_invalid_validation_fields(yaml_text)
+
     # Fix Java 8 regex named group names — underscores not allowed
     # Convert (?<SOME_NAME>...) → (?<someName>...)
     yaml_text = _fix_regex_group_names(yaml_text)
@@ -751,6 +754,63 @@ def _strip_invalid_register_fields(yaml_text: str) -> str:
             return out.getvalue()
     except Exception as e:
         logger.warning("Failed to strip invalid register fields: %s", e)
+    return yaml_text
+
+
+_VALID_VALIDATION_BRANCH_FIELDS = {"criteria", "message"}
+
+
+def _strip_invalid_validation_fields(yaml_text: str) -> str:
+    """Remove invalid fields from validation success/failure/warning branches.
+
+    Java ValidationBranchDefinition only allows 'criteria' and 'message'.
+    LLM sometimes puts 'on_failure', 'action', etc. inside these branches.
+    """
+    from ruamel.yaml import YAML
+    try:
+        yaml = YAML()
+        yaml.preserve_quotes = True
+        data = yaml.load(StringIO(yaml_text))
+        if not isinstance(data, dict):
+            return yaml_text
+
+        phases = data.get("phases", {})
+        if not isinstance(phases, dict):
+            return yaml_text
+
+        changed = False
+
+        def _clean_steps(steps: list):
+            nonlocal changed
+            for step in steps:
+                if not isinstance(step, dict):
+                    continue
+                val = step.get("validation")
+                if isinstance(val, dict):
+                    for branch_key in ("success", "failure", "warning"):
+                        branch = val.get(branch_key)
+                        if isinstance(branch, dict):
+                            bad = [k for k in branch if k not in _VALID_VALIDATION_BRANCH_FIELDS]
+                            for k in bad:
+                                del branch[k]
+                                changed = True
+                                logger.info("Stripped invalid validation.%s field: %s", branch_key, k)
+                nested = step.get("steps", [])
+                if isinstance(nested, list):
+                    _clean_steps(nested)
+
+        for pdef in phases.values():
+            if isinstance(pdef, dict):
+                steps = pdef.get("steps", [])
+                if isinstance(steps, list):
+                    _clean_steps(steps)
+
+        if changed:
+            out = StringIO()
+            yaml.dump(data, out)
+            return out.getvalue()
+    except Exception as e:
+        logger.warning("Failed to strip invalid validation fields: %s", e)
     return yaml_text
 
 
