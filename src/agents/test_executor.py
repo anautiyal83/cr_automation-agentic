@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import re
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -159,13 +160,18 @@ class TestExecutor:
     async def _run_exec_test(self, input_data: dict, config: Any) -> StepOutput:
         """Test workflow execution via cli-automation-standalone JAR.
 
-        CLI: java -jar cli-automation-standalone.jar execute
-             --json <json> --schema <schema> --yaml <workflow>
-             --node <node> --activity <name> [--cr <cr>] [--output-dir <dir>]
+        1. Start MockWire simulator instances
+        2. Patch workflow node SSH hosts to point to localhost:<sim_port>
+        3. Run cli-automation-standalone.jar execute
+        4. Stop MockWire simulators
+        5. Generate execution report via execution-report-generator JAR
         """
+        from ruamel.yaml import YAML as RuamelYAML
+
         failures: list[dict[str, Any]] = []
         results: dict[str, Any] = {}
         timeout = 300
+        sim_processes: list[subprocess.Popen] = []
 
         artifacts = input_data.get("artifacts", {})
         run_dir = Path(input_data.get("run_dir", "."))
@@ -232,6 +238,69 @@ class TestExecutor:
             first_cr = "CR1"
             first_node = "node-1"
 
+        # ── Load simulator manifest and start MockWire instances ──
+        sim_dir = run_dir / "simulator"
+        manifest_path = sim_dir / "simulator_manifest.yaml"
+        node_port_map: dict[str, int] = {}  # node_name → simulator port
+
+        if manifest_path.exists():
+            ryaml = RuamelYAML()
+            with open(str(manifest_path), "r", encoding="utf-8") as f:
+                manifest = ryaml.load(f) or {}
+
+            mockwire_jar_path = self._find_mockwire_jar(config)
+            instances = manifest.get("instances", [])
+
+            for inst in instances:
+                inst_name = inst.get("name", "")
+                inst_port = inst.get("port", 0)
+                inst_config = inst.get("config", "")
+                if not (inst_name and inst_port):
+                    continue
+                node_port_map[inst_name] = inst_port
+
+                if not mockwire_jar_path:
+                    logger.warning("MockWire JAR not found — skipping simulator start")
+                    continue
+
+                # Copy config to MockWire's expected location: config/<name>.yaml
+                mockwire_dir = Path(mockwire_jar_path).parent
+                mw_config_dir = mockwire_dir / "config"
+                mw_config_dir.mkdir(exist_ok=True)
+                if inst_config and Path(inst_config).exists():
+                    dest = mw_config_dir / f"{inst_name}.yaml"
+                    shutil.copy2(inst_config, str(dest))
+                    # Also copy response data files
+                    sim_data_dir = sim_dir / "data"
+                    mw_outputs_dir = mockwire_dir / "outputs" / inst_name / "responses"
+                    if sim_data_dir.exists():
+                        mw_outputs_dir.mkdir(parents=True, exist_ok=True)
+                        for df in sim_data_dir.iterdir():
+                            if df.is_file():
+                                shutil.copy2(str(df), str(mw_outputs_dir / df.name))
+
+                # Start MockWire instance
+                try:
+                    proc = subprocess.Popen(
+                        ["java", "-jar", mockwire_jar_path,
+                         "--name", inst_name, "--port", str(inst_port)],
+                        cwd=str(Path(mockwire_jar_path).parent),
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    )
+                    sim_processes.append(proc)
+                    logger.info("Started MockWire: %s on port %d (pid=%d)",
+                                inst_name, inst_port, proc.pid)
+                except Exception as e:
+                    logger.warning("Failed to start MockWire %s: %s", inst_name, e)
+
+            # Wait for simulators to be ready
+            if sim_processes:
+                await asyncio.sleep(3)
+
+        # ── Patch workflow SSH hosts to point to localhost:<sim_port> ──
+        if node_port_map:
+            self._patch_workflow_hosts(workflow_path, node_port_map)
+
         # Build execution command
         cmd = [
             "java", "-jar", cli_jar,
@@ -264,6 +333,15 @@ class TestExecutor:
             failures.append({"test": "workflow_execution", "error": f"Timeout after {timeout}s"})
         except Exception as e:
             failures.append({"test": "workflow_execution", "error": str(e)})
+        finally:
+            # Stop all MockWire simulator instances
+            for proc in sim_processes:
+                try:
+                    proc.terminate()
+                    proc.wait(timeout=10)
+                    logger.info("Stopped MockWire (pid=%d)", proc.pid)
+                except Exception:
+                    proc.kill()
 
         # ── Generate execution report via execution-report-generator JAR ──
         report_html = ""
@@ -364,3 +442,67 @@ class TestExecutor:
                 p = project_root / p
             return str(p)
         return val
+
+    @staticmethod
+    def _find_mockwire_jar(config: Any) -> str | None:
+        """Locate the MockWire JAR. Check config, then known paths."""
+        # Check config for simulator_folder
+        sim_folder = ""
+        if isinstance(config, dict):
+            sim_folder = config.get("simulator_folder", "")
+        else:
+            sim_folder = getattr(config, "simulator_folder", "")
+
+        candidates = []
+        if sim_folder:
+            candidates.append(Path(sim_folder) / "mockwire.jar")
+            candidates.append(Path(sim_folder) / "mockwire-simulator" / "mockwire.jar")
+
+        # Default project-relative paths
+        project_root = Path(__file__).resolve().parent.parent.parent
+        candidates.extend([
+            project_root / "lib" / "mockwire" / "mockwire-simulator" / "mockwire.jar",
+            project_root / "lib" / "simulator" / "mockwire.jar",
+        ])
+
+        for c in candidates:
+            if c.exists():
+                return str(c)
+        return None
+
+    @staticmethod
+    def _patch_workflow_hosts(workflow_path: Path, node_port_map: dict[str, int]) -> None:
+        """Patch workflow YAML node SSH hosts to localhost:<sim_port> for simulator testing."""
+        from ruamel.yaml import YAML as RuamelYAML
+
+        ryaml = RuamelYAML()
+        ryaml.preserve_quotes = True
+        with open(str(workflow_path), "r", encoding="utf-8") as f:
+            wf = ryaml.load(f)
+        if not wf:
+            return
+
+        nodes = wf.get("nodes", {})
+        patched = False
+        for node_name, node_def in nodes.items():
+            if not isinstance(node_def, dict):
+                continue
+            port = node_port_map.get(node_name)
+            if port is None:
+                continue
+            ssh = node_def.get("ssh", {})
+            if isinstance(ssh, dict):
+                ssh["host"] = "localhost"
+                ssh["port"] = port
+                # Set default test credentials for simulator
+                ssh["user"] = ssh.get("user", "automation-user")
+                auth = ssh.get("auth", {})
+                if isinstance(auth, dict):
+                    auth["password"] = auth.get("password", "automation-pass")
+                    ssh["auth"] = auth
+                patched = True
+                logger.info("Patched workflow node %s → localhost:%d", node_name, port)
+
+        if patched:
+            with open(str(workflow_path), "w", encoding="utf-8") as f:
+                ryaml.dump(wf, f)
