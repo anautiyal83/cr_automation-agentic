@@ -389,8 +389,10 @@ def _build_mockwire_config(
         lines = [l.strip() for l in send.strip().split("\n") if l.strip()]
 
         if len(lines) <= 1:
-            # Single-line command
+            # Single-line command — strip pipe suffix since MockWire handles pipes internally
             cmd_key = lines[0] if lines else send.strip()
+            if " | " in cmd_key:
+                cmd_key = cmd_key.split(" | ")[0].strip()
         else:
             # Multi-line (heredoc) command — extract significant inner lines
             filler = {"EOF", "EXIT", "SAVE", "END", "QUIT", "BYE", "CONFIG", "COMMIT"}
