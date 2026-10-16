@@ -141,8 +141,7 @@ class ProgressSection:
     }
 
     def _step_widget(self, step_num: int):
-        with ui.column().classes("items-center gap-0 flex-shrink-0") \
-                .style("min-width: 50px") as col:
+        with ui.column().classes("items-center gap-0 flex-shrink-0 flex-1") as col:
             # Circle icon
             icon_container = ui.element("div").classes("cr-step-circle")
             with icon_container:
