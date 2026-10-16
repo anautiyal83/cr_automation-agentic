@@ -77,6 +77,15 @@ class JsonTemplateAgent:
                 "Fix the issues and regenerate."
             )
 
+        # Include validation rules from Step 3 for exact column name reference
+        val_rules = input_data.get("artifacts", {}).get("validation_rules_yaml", "")
+        val_rules_section = ""
+        if val_rules:
+            val_rules_section = (
+                f"\n=== VALIDATION RULES (from Step 3 — use these EXACT column names) ===\n"
+                f"{val_rules[:4000]}\n"
+            )
+
         uc_name = input_data.get("uc_name", "UC")
         parts = uc_name.split("_", 1)
         node_type = parts[0] if len(parts) == 2 else uc_name
@@ -151,7 +160,7 @@ data:
 
             f"=== SCHEMA REFERENCE ===\n{schema[:8000]}\n\n"
 
-            f"{few_shot_text}{retry_info}\n\n"
+            f"{few_shot_text}{retry_info}{val_rules_section}\n\n"
 
             "=== GENERATION INSTRUCTIONS ===\n\n"
 
