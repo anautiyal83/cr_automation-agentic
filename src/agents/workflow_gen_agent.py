@@ -326,6 +326,15 @@ class WorkflowGenAgent:
             "      value: '${someVar}'\n"
             "WRONG register formats: register: {name: regex} or register: name: regex\n\n"
 
+            "FOR_EACH loops (iterate over configData items):\n"
+            "  - for_each: '${configDataList}'\n"
+            "    item_var: currentItem\n"
+            "    steps:\n"
+            "      - node: target_node\n"
+            "        command_description: Process item\n"
+            "        send: 'process ${currentItem}'\n"
+            "WRONG loop format: '- loop: { id: ..., items: ... }' — 'loop' is NOT a valid step field\n\n"
+
             "VALIDATION: must be a single OBJECT (not a list):\n"
             "  validation:\n"
             "    enabled: true\n"
@@ -337,7 +346,7 @@ class WorkflowGenAgent:
             "      message: Failed\n"
             "WRONG validation formats: validation: [list], success_expr, success_regex\n\n"
 
-            "FORBIDDEN step fields: id, step_id, step_name — use command_description instead\n"
+            "FORBIDDEN step fields: id, step_id, step_name, loop — use command_description instead of id, use for_each instead of loop\n"
             "FORBIDDEN register fields: error_on_missing, default_value, optional — these are NOT recognized by the Java model\n"
             "ONLY valid register fields: regex, name, value, when, loop, start_index, count_var\n\n"
 
@@ -577,8 +586,10 @@ def _validate_workflow_structure(yaml_text: str) -> list[str]:
         "register", "validation", "retries", "retry_delay_sec", "when",
         "skip_when", "expect_reply", "prompt_regex", "for_each", "enabled",
         "interaction_timeout_sec", "name", "description", "steps",
+        "item_var", "max_iterations", "continue_when", "break_when",
+        "rest", "sftp", "email",
     }
-    INVALID_STEP_FIELDS = {"id", "step_id", "step_name"}
+    INVALID_STEP_FIELDS = {"id", "step_id", "step_name", "loop"}
 
     total_steps = 0
     step_errors_found = 0
