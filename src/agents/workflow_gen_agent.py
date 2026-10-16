@@ -337,7 +337,9 @@ class WorkflowGenAgent:
             "      message: Failed\n"
             "WRONG validation formats: validation: [list], success_expr, success_regex\n\n"
 
-            "FORBIDDEN step fields: id, step_id, step_name — use command_description instead\n\n"
+            "FORBIDDEN step fields: id, step_id, step_name — use command_description instead\n"
+            "FORBIDDEN register fields: error_on_missing, default_value, optional — these are NOT recognized by the Java model\n"
+            "ONLY valid register fields: regex, name, value, when, loop, start_index, count_var\n\n"
 
             "=== VARIABLE NAMING ===\n\n"
             "Use ${varName} syntax. At runtime, the framework provides:\n"
@@ -452,6 +454,58 @@ def _fix_workflow_yaml(yaml_text: str) -> str:
 
     yaml_text = re.sub(r'"((?:[^"\\]|\\.)*)"', _fix_double_quoted_regex, yaml_text)
 
+    # Strip invalid register item properties that the Java model doesn't recognize
+    yaml_text = _strip_invalid_register_fields(yaml_text)
+
+    return yaml_text
+
+
+# Valid fields for RegisterDefinition (Java model)
+_VALID_REGISTER_FIELDS = {"regex", "name", "value", "when", "loop", "start_index", "count_var"}
+
+
+def _strip_invalid_register_fields(yaml_text: str) -> str:
+    """Parse YAML and remove any unrecognized fields from register items."""
+    from ruamel.yaml import YAML
+    try:
+        yaml = YAML()
+        yaml.preserve_quotes = True
+        data = yaml.load(StringIO(yaml_text))
+        if not isinstance(data, dict):
+            return yaml_text
+
+        phases = data.get("phases", {})
+        if not isinstance(phases, dict):
+            return yaml_text
+
+        changed = False
+        for pdef in phases.values():
+            if not isinstance(pdef, dict):
+                continue
+            steps = pdef.get("steps", [])
+            if not isinstance(steps, list):
+                continue
+            for step in steps:
+                if not isinstance(step, dict):
+                    continue
+                reg = step.get("register")
+                if not isinstance(reg, list):
+                    continue
+                for item in reg:
+                    if not isinstance(item, dict):
+                        continue
+                    bad_keys = [k for k in item if k not in _VALID_REGISTER_FIELDS]
+                    for k in bad_keys:
+                        del item[k]
+                        changed = True
+                        logger.info("Stripped invalid register field: %s", k)
+
+        if changed:
+            out = StringIO()
+            yaml.dump(data, out)
+            return out.getvalue()
+    except Exception as e:
+        logger.warning("Failed to strip invalid register fields: %s", e)
     return yaml_text
 
 
@@ -518,6 +572,17 @@ def _validate_workflow_structure(yaml_text: str) -> list[str]:
                         f"Got: {str(reg)[:80]}"
                     )
                     step_errors_found += 1
+                elif isinstance(reg, list):
+                    for ri, ritem in enumerate(reg):
+                        if isinstance(ritem, dict):
+                            bad_rkeys = set(ritem.keys()) - _VALID_REGISTER_FIELDS
+                            if bad_rkeys:
+                                errors.append(
+                                    f"Phase '{pname}', step {i+1}, register[{ri}]: "
+                                    f"invalid fields {bad_rkeys}. "
+                                    f"Only {_VALID_REGISTER_FIELDS} are allowed."
+                                )
+                                step_errors_found += 1
 
                 # Check validation format
                 val = step.get("validation")
