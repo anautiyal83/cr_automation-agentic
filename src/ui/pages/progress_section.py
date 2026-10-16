@@ -133,9 +133,16 @@ class ProgressSection:
                                              on_click=self._go_outputs) \
                     .props("unelevated color=teal-6 size=sm no-caps")
 
+    # Short names for compact single-row display
+    _SHORT_NAMES = {
+        1: "Doc Parse", 2: "UC Analyze", 3: "Val Rules", 4: "JSON Gen",
+        5: "CIQ Test", 6: "Workflow", 7: "MOP Test", 8: "Sim Config",
+        9: "Exec Test", 10: "Report",
+    }
+
     def _step_widget(self, step_num: int):
         with ui.column().classes("items-center gap-0 flex-shrink-0") \
-                .style("min-width: 50px; max-width: 65px") as col:
+                .style("min-width: 50px") as col:
             # Circle icon
             icon_container = ui.element("div").classes("cr-step-circle")
             with icon_container:
@@ -145,9 +152,9 @@ class ProgressSection:
 
             # Step label
             label = ui.label(f"{step_num}").classes("text-[9px] cr-text-dim font-semibold")
-            name = ui.label(STEP_NAMES.get(step_num, "")) \
-                .classes("text-[8px] cr-text-dim text-center leading-tight") \
-                .style("max-width: 65px; word-wrap: break-word")
+            name = ui.label(self._SHORT_NAMES.get(step_num, "")) \
+                .classes("text-[8px] cr-text-dim text-center") \
+                .style("white-space: nowrap")
             status_label = ui.label("pending") \
                 .classes("text-[8px] cr-text-dim")
 
