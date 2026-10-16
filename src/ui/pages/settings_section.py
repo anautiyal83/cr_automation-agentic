@@ -218,39 +218,34 @@ class SettingsSection:
                 tab_panels["modules"] = panel
                 panel.set_visibility(False)
                 with ui.card().classes("w-full p-3 cr-card-inner"):
-                    ui.label("Java Modules").classes("text-caption font-semibold")
-                    with ui.column().classes("w-full gap-1"):
+                    ui.label("Java JAR Modules").classes("text-caption font-semibold")
+                    with ui.row().classes("w-full gap-2"):
                         self.ciq_jar = ui.input(
-                            "CIQ Processor JAR",
-                            placeholder="./lib/ciq-processor.jar",
-                        ).classes("w-full").props("outlined dense")
+                            "CIQ Processor", placeholder="./lib/ciq-processor.jar",
+                        ).classes("flex-1").props("outlined dense")
                         self.cli_jar = ui.input(
-                            "CLI Automation JAR",
-                            placeholder="./lib/cli-automation-standalone.jar",
-                        ).classes("w-full").props("outlined dense")
+                            "CLI Automation", placeholder="./lib/cli-automation-standalone.jar",
+                        ).classes("flex-1").props("outlined dense")
                         self.exec_report_jar = ui.input(
-                            "Execution Report Generator JAR",
-                            placeholder="./lib/execution-report-generator.jar",
-                        ).classes("w-full").props("outlined dense")
+                            "Report Generator", placeholder="./lib/execution-report-generator.jar",
+                        ).classes("flex-1").props("outlined dense")
 
-                with ui.card().classes("w-full p-3 cr-card-inner"):
-                    ui.label("HTML Report Templates").classes("text-caption font-semibold")
-                    with ui.column().classes("w-full gap-1"):
+                    ui.label("HTML Templates").classes("text-caption font-semibold mt-2")
+                    with ui.row().classes("w-full gap-2"):
                         self.mop_template = ui.input(
-                            "MOP Summary Template",
+                            "MOP Summary",
                             value="./lib/templates/mop_summary_report_template_v2.html",
-                        ).classes("w-full").props("outlined dense")
+                        ).classes("flex-1").props("outlined dense")
                         self.exec_summary_template = ui.input(
-                            "Execution Summary Template",
+                            "Exec Summary",
                             value="./lib/templates/mop_execution_summary_report_template.html",
-                        ).classes("w-full").props("outlined dense")
+                        ).classes("flex-1").props("outlined dense")
                         self.exec_failure_template = ui.input(
-                            "Execution Failure Template",
+                            "Exec Failure",
                             value="./lib/templates/execution_failure_template.html",
-                        ).classes("w-full").props("outlined dense")
+                        ).classes("flex-1").props("outlined dense")
 
-                with ui.card().classes("w-full p-3 cr-card-inner"):
-                    ui.label("Mock Simulator").classes("text-caption font-semibold")
+                    ui.label("Mock Simulator").classes("text-caption font-semibold mt-2")
                     with ui.row().classes("w-full gap-2"):
                         self.sim_endpoint = ui.input(
                             "Endpoint", value="localhost:8080",
