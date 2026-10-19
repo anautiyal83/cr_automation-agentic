@@ -857,14 +857,18 @@ def _strip_invalid_register_fields(yaml_text: str) -> str:
     return yaml_text
 
 
+_VALID_VALIDATION_FIELDS = {"enabled", "success", "failure", "warning"}
 _VALID_VALIDATION_BRANCH_FIELDS = {"criteria", "message"}
 
 
 def _strip_invalid_validation_fields(yaml_text: str) -> str:
-    """Remove invalid fields from validation success/failure/warning branches.
+    """Fix validation structure to match Java ValidationDefinition.
 
-    Java ValidationBranchDefinition only allows 'criteria' and 'message'.
-    LLM sometimes puts 'on_failure', 'action', etc. inside these branches.
+    Fixes:
+    1. Remove invalid fields from validation (description, etc.)
+    2. Remove invalid fields from success/failure/warning branches
+    3. Fix criteria as string → {expr: '...'} object
+    4. Fix criteria as multi-line block → single expr
     """
     from ruamel.yaml import YAML
     try:
@@ -887,14 +891,40 @@ def _strip_invalid_validation_fields(yaml_text: str) -> str:
                     continue
                 val = step.get("validation")
                 if isinstance(val, dict):
+                    # Remove invalid top-level validation fields
+                    bad_top = [k for k in val if k not in _VALID_VALIDATION_FIELDS]
+                    for k in bad_top:
+                        del val[k]
+                        changed = True
+                        logger.info("Stripped invalid validation field: %s", k)
+
                     for branch_key in ("success", "failure", "warning"):
                         branch = val.get(branch_key)
                         if isinstance(branch, dict):
+                            # Remove invalid branch fields
                             bad = [k for k in branch if k not in _VALID_VALIDATION_BRANCH_FIELDS]
                             for k in bad:
                                 del branch[k]
                                 changed = True
                                 logger.info("Stripped invalid validation.%s field: %s", branch_key, k)
+
+                            # Fix criteria: string → {expr: '...'}
+                            crit = branch.get("criteria")
+                            if isinstance(crit, str):
+                                # Multi-line JS code → flatten to single expression
+                                crit = crit.strip()
+                                if "\n" in crit:
+                                    # Complex multi-line → simplify to 'true' (can't parse JS)
+                                    crit = "true"
+                                    logger.info("Simplified multi-line validation criteria to 'true'")
+                                branch["criteria"] = {"expr": crit}
+                                changed = True
+                                logger.info("Fixed validation criteria: string → {expr: ...}")
+                elif isinstance(val, list):
+                    # validation as list → invalid, convert first item or remove
+                    step["validation"] = val[0] if val and isinstance(val[0], dict) else {"enabled": True}
+                    changed = True
+
                 nested = step.get("steps", [])
                 if isinstance(nested, list):
                     _clean_steps(nested)
