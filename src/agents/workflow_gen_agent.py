@@ -467,6 +467,9 @@ def _fix_workflow_yaml(yaml_text: str) -> str:
     # Remove BOM
     yaml_text = yaml_text.strip().lstrip("\ufeff")
 
+    # Strip control characters (LLM sometimes generates ASCII 0x00-0x08, 0x0B-0x0C, 0x0E-0x1F)
+    yaml_text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', yaml_text)
+
     # Fix tabs → 2 spaces
     yaml_text = yaml_text.replace("\t", "  ")
 
