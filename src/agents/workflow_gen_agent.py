@@ -548,6 +548,9 @@ def _fix_workflow_yaml(yaml_text: str) -> str:
     # Fix for_each steps missing 'node' — Java JAR requires it on every step
     yaml_text = _fix_missing_node_in_steps(yaml_text)
 
+    # Rename invalid step fields to valid Java model equivalents
+    yaml_text = _rename_invalid_step_fields(yaml_text)
+
     # Strip invalid register item properties that the Java model doesn't recognize
     yaml_text = _strip_invalid_register_fields(yaml_text)
 
@@ -633,6 +636,69 @@ def _fix_for_each_at_phase_level(yaml_text: str) -> str:
             return out.getvalue()
     except Exception as e:
         logger.warning("Failed to fix for_each at phase level: %s", e)
+    return yaml_text
+
+
+def _rename_invalid_step_fields(yaml_text: str) -> str:
+    """Rename invalid step field names to their Java model equivalents.
+
+    Common LLM mistakes:
+    - 'if' → 'when' (conditional execution)
+    - 'loop' → 'for_each' (iteration)
+    - 'id' / 'step_id' / 'step_name' → removed (use command_description)
+    - 'send_options' → removed (not in Java model)
+    """
+    from ruamel.yaml import YAML
+    try:
+        yaml = YAML()
+        yaml.preserve_quotes = True
+        data = yaml.load(StringIO(yaml_text))
+        if not isinstance(data, dict):
+            return yaml_text
+
+        phases = data.get("phases", {})
+        if not isinstance(phases, dict):
+            return yaml_text
+
+        _RENAME_MAP = {"if": "when", "loop": "for_each", "cmd": "send", "command": "send"}
+        _REMOVE_SET = {"id", "step_id", "step_name", "send_options", "type", "action"}
+
+        changed = False
+
+        def _fix_steps(steps: list):
+            nonlocal changed
+            for step in steps:
+                if not isinstance(step, dict):
+                    continue
+                # Rename fields
+                for old, new in _RENAME_MAP.items():
+                    if old in step and new not in step:
+                        step[new] = step.pop(old)
+                        changed = True
+                        logger.info("Renamed step field '%s' -> '%s'", old, new)
+                # Remove invalid fields
+                for bad in list(step.keys()):
+                    if bad in _REMOVE_SET:
+                        del step[bad]
+                        changed = True
+                        logger.info("Removed invalid step field '%s'", bad)
+                # Recurse
+                nested = step.get("steps", [])
+                if isinstance(nested, list):
+                    _fix_steps(nested)
+
+        for pdef in phases.values():
+            if isinstance(pdef, dict):
+                steps = pdef.get("steps", [])
+                if isinstance(steps, list):
+                    _fix_steps(steps)
+
+        if changed:
+            out = StringIO()
+            yaml.dump(data, out)
+            return out.getvalue()
+    except Exception as e:
+        logger.warning("Failed to rename invalid step fields: %s", e)
     return yaml_text
 
 
