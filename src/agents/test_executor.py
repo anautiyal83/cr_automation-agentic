@@ -495,25 +495,28 @@ class TestExecutor:
             if port is None:
                 continue
             ssh = node_def.get("ssh", {})
-            if isinstance(ssh, dict):
-                ssh["host"] = "localhost"
-                ssh["port"] = port
-                # Resolve ${} placeholders in credentials to sensible defaults
-                # (MockWire is configured with the same values from the workflow)
-                user = ssh.get("user", "root")
-                if isinstance(user, str) and user.startswith("${"):
-                    ssh["user"] = "root"
-                auth = ssh.get("auth", {})
-                if isinstance(auth, dict):
-                    pw = auth.get("password", "")
-                    if isinstance(pw, str) and pw.startswith("${"):
-                        auth["password"] = "password"
-                elif not auth:
-                    ssh["auth"] = {"password": "password"}
-                # Keep original prompt_regex — MockWire is configured to match it
-                patched = True
-                logger.info("Patched workflow node %s → localhost:%d (user=automation-user)",
-                            node_name, port)
+            if not isinstance(ssh, dict):
+                ssh = {}
+                node_def["ssh"] = ssh
+            ssh["host"] = "localhost"
+            ssh["port"] = port
+            # Resolve ${} placeholders in credentials
+            user = ssh.get("user", "root")
+            if isinstance(user, str) and user.startswith("${"):
+                ssh["user"] = "root"
+            auth = ssh.get("auth", {})
+            if isinstance(auth, dict):
+                pw = str(auth.get("password", ""))
+                if pw.startswith("${") or not pw:
+                    auth["password"] = "password"
+            else:
+                ssh["auth"] = {"password": "password"}
+            # Set a simple prompt_regex that reliably matches MockWire's prompt
+            # MockWire sends: "node_name# " → regex must match "#" or ">" or "$" at end
+            # Use simple regex without \s to avoid YAML escaping issues
+            node_def["prompt_regex"] = "(?m)[#>$] *$"
+            patched = True
+            logger.info("Patched node %s -> localhost:%d (user=%s)", node_name, port, ssh.get("user", "?"))
 
         if patched:
             with open(str(workflow_path), "w", encoding="utf-8") as f:
