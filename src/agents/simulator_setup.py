@@ -348,19 +348,10 @@ def _build_mockwire_config(
     data_dir: Path,
 ) -> dict:
     """Build a MockWire YAML config for a node."""
-    ssh_def = node_def.get("ssh", {}) or {}
-
-    # Auth config
-    user = ssh_def.get("user", "automation-user")
-    # Strip ${} placeholders
-    if isinstance(user, str) and user.startswith("${"):
-        user = "automation-user"
-
+    # Always use 'automation-user' — the test executor patches workflow
+    # SSH credentials to this same username for simulator testing
+    user = "automation-user"
     prompt = f"[{user}@{node_name} ~]$ "
-    prompt_regex = node_def.get("prompt_regex", "")
-    if prompt_regex:
-        # Use a simplified prompt that matches the regex
-        prompt = f"<{node_name}:{user}> # "
 
     config: dict[str, Any] = {
         "config": {
@@ -373,6 +364,7 @@ def _build_mockwire_config(
             "enabled": True,
             "users": [{
                 "username": user,
+                "password": "automation-pass",
                 "prompt": prompt,
             }],
         },
