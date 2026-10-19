@@ -243,6 +243,13 @@ data:
         # Fix common YAML quoting issues
         yaml_content = _fix_yaml_quoting(yaml_content)
 
+        # Auto-fix column references to match actual CIQ
+        ciq_path = input_data.get("ciq_file_path", "")
+        logger.info("Step 4: ciq_path=%s exists=%s", ciq_path, Path(ciq_path).exists() if ciq_path else False)
+        if ciq_path and Path(ciq_path).exists():
+            yaml_content = _autofix_json_template(yaml_content, ciq_path)
+            logger.info("Step 4: auto-fix applied")
+
         # Validate YAML syntax — return failed so retry can re-generate
         try:
             _validate_yaml(yaml_content)
@@ -259,6 +266,187 @@ data:
             output_data={"json_template_yaml": yaml_content},
             artifacts=[],
         )
+
+
+def _autofix_json_template(yaml_text: str, ciq_path: str) -> str:
+    """Auto-fix column and sheet references in json-output.yaml to match actual CIQ.
+
+    Scans all string values in the YAML for Sheet.Column references and fixes them
+    using fuzzy matching against actual CIQ column names.
+    """
+    import openpyxl
+    from difflib import get_close_matches
+
+    try:
+        wb = openpyxl.load_workbook(ciq_path, read_only=True, data_only=True)
+    except Exception:
+        return yaml_text
+
+    # Build CIQ structure
+    ciq_sheets: dict[str, list[str]] = {}
+    ciq_sheet_map: dict[str, str] = {}  # lower → original
+    all_columns: dict[str, str] = {}  # col_lower → col_original (across all sheets)
+    for sn in wb.sheetnames:
+        ws = wb[sn]
+        headers = []
+        for cell in next(ws.iter_rows(min_row=1, max_row=1), []):
+            if cell.value:
+                h = str(cell.value).strip()
+                headers.append(h)
+                all_columns[h.lower()] = h
+        ciq_sheets[sn] = headers
+        ciq_sheet_map[sn.lower()] = sn
+    wb.close()
+
+    all_col_names_lower = list(all_columns.keys())
+
+    def _fix_col_ref(col_name: str, sheet_name: str = "") -> str:
+        """Fix a single column reference, optionally within a specific sheet."""
+        cl = col_name.lower().strip("'\"")
+        # Try sheet-specific lookup first
+        if sheet_name:
+            actual_sn = ciq_sheet_map.get(sheet_name.lower(), "")
+            sheet_cols = ciq_sheets.get(actual_sn, [])
+            sheet_cols_lower = {c.lower(): c for c in sheet_cols}
+            if cl in sheet_cols_lower:
+                return sheet_cols_lower[cl]
+            matches = get_close_matches(cl, list(sheet_cols_lower.keys()), n=1, cutoff=0.5)
+            if matches:
+                fixed = sheet_cols_lower[matches[0]]
+                logger.info("Auto-fix json-output: '%s' -> '%s' (in sheet '%s')", col_name, fixed, actual_sn)
+                return fixed
+        # Fallback to global lookup
+        if cl in all_columns:
+            return all_columns[cl]
+        matches = get_close_matches(cl, all_col_names_lower, n=1, cutoff=0.6)
+        if matches:
+            fixed = all_columns[matches[0]]
+            logger.info("Auto-fix json-output: '%s' -> '%s'", col_name, fixed)
+            return fixed
+        return col_name
+
+    def _fix_sheet_ref(sheet_name: str) -> str:
+        """Fix a sheet name reference."""
+        sl = sheet_name.lower()
+        if sl in ciq_sheet_map:
+            return ciq_sheet_map[sl]
+        return sheet_name
+
+    # Parse YAML and fix references in the data structure
+    from ruamel.yaml import YAML
+    from io import StringIO
+    import re
+
+    yaml = YAML()
+    yaml.preserve_quotes = True
+    try:
+        data = yaml.load(StringIO(yaml_text))
+    except Exception:
+        return yaml_text
+
+    if not isinstance(data, dict):
+        return yaml_text
+
+    changed = False
+
+    def _fix_string_value(val: str) -> str:
+        """Fix column/sheet references in a string value."""
+        nonlocal changed
+        if not isinstance(val, str):
+            return val
+        result = val
+
+        # Fix Sheet.Column patterns: Index.Node → Index.ZONE
+        def _fix_dotted(m):
+            nonlocal changed
+            sheet = m.group(1)
+            col = m.group(2).strip("'\"")
+            new_sheet = _fix_sheet_ref(sheet)
+            new_col = _fix_col_ref(col, sheet_name=new_sheet)
+            if new_sheet != sheet or new_col != col:
+                changed = True
+            col_ref = f"'{new_col}'" if " " in new_col else new_col
+            return f"{new_sheet}.{col_ref}"
+
+        result = re.sub(r"([A-Z]\w*)\.([\w]+|'[^']*')", _fix_dotted, result)
+
+        # Fix WHERE/AND column references
+        def _fix_where(m):
+            nonlocal changed
+            prefix = m.group(1)
+            col = m.group(2)
+            new_col = _fix_col_ref(col)
+            if new_col != col:
+                changed = True
+            return f"{prefix}{new_col}"
+
+        result = re.sub(r"(WHERE\s+|AND\s+)(\w+)(?=\s*=)", _fix_where, result)
+
+        return result
+
+    def _fix_recursive(obj):
+        """Recursively fix all string values in a nested dict/list."""
+        nonlocal changed
+        if isinstance(obj, dict):
+            new_dict = {}
+            for k, v in obj.items():
+                new_key = k
+                # Fix tableKeys keys — should be actual CIQ sheet names
+                if isinstance(v, dict) and k not in ("meta", "data", "crGroups", "nodeGroups", "nodes", "tables", "records"):
+                    # Only rename keys inside tableKeys section
+                    parent_is_tablekeys = False  # will be handled separately below
+                    fixed_key = k
+                    if fixed_key != k:
+                        new_key = fixed_key
+                        changed = True
+                        logger.info("Auto-fix json-output: tableKey '%s' -> '%s'", k, fixed_key)
+                new_dict[new_key] = _fix_recursive(v)
+            return new_dict
+        elif isinstance(obj, list):
+            return [_fix_recursive(item) for item in obj]
+        elif isinstance(obj, str):
+            return _fix_string_value(obj)
+        return obj
+
+    fixed_data = _fix_recursive(data)
+
+    # Fix tableKeys section — rename keys to actual CIQ data sheet names
+    meta = fixed_data.get("data", {}).get("meta", {})
+    table_keys = meta.get("tableKeys", {})
+    if isinstance(table_keys, dict):
+        data_sheets = [sn for sn in ciq_sheets if sn.lower() not in ("index", "ip")]
+        new_table_keys = {}
+        for tk_name, tk_def in table_keys.items():
+            # Map tableKey name to actual CIQ data sheet
+            new_name = _fix_sheet_ref(tk_name)
+            if new_name == tk_name and data_sheets:
+                new_name = data_sheets[0]
+                logger.info("Auto-fix json-output: tableKey '%s' -> '%s'", tk_name, new_name)
+                changed = True
+            elif new_name != tk_name:
+                changed = True
+            # Fix recordPrimaryKeys
+            if isinstance(tk_def, dict) and "recordPrimaryKeys" in tk_def:
+                rpk = tk_def["recordPrimaryKeys"]
+                if isinstance(rpk, str):
+                    # Use columns from the target data sheet
+                    sheet_cols = ciq_sheets.get(new_name, [])
+                    new_rpk = ",".join(_fix_col_ref(k.strip(), sheet_name=new_name) for k in rpk.split(","))
+                    if new_rpk != rpk:
+                        tk_def["recordPrimaryKeys"] = new_rpk
+                        changed = True
+            new_table_keys[new_name] = tk_def
+        meta["tableKeys"] = new_table_keys
+
+    if changed:
+        buf = StringIO()
+        yaml_out = YAML()
+        yaml_out.default_flow_style = False
+        yaml_out.dump(fixed_data, buf)
+        logger.info("Auto-fix applied to json-output.yaml")
+        return buf.getvalue()
+
+    return yaml_text
 
 
 def _fix_yaml_quoting(yaml_text: str) -> str:
