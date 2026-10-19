@@ -498,17 +498,19 @@ class TestExecutor:
             if isinstance(ssh, dict):
                 ssh["host"] = "localhost"
                 ssh["port"] = port
-                # Override credentials — workflow may have unresolved placeholders
-                # like ${node_user} / ${SECRET.node_password}
-                ssh["user"] = "automation-user"
+                # Resolve ${} placeholders in credentials to sensible defaults
+                # (MockWire is configured with the same values from the workflow)
+                user = ssh.get("user", "root")
+                if isinstance(user, str) and user.startswith("${"):
+                    ssh["user"] = "root"
                 auth = ssh.get("auth", {})
                 if isinstance(auth, dict):
-                    auth["password"] = "automation-pass"
-                else:
-                    ssh["auth"] = {"password": "automation-pass"}
-                # Override prompt_regex to match MockWire simulator prompt
-                # MockWire prompt format: [automation-user@node ~]$  or ends with # > $
-                node_def["prompt_regex"] = "(?m)[#>$]\\s*$"
+                    pw = auth.get("password", "")
+                    if isinstance(pw, str) and pw.startswith("${"):
+                        auth["password"] = "password"
+                elif not auth:
+                    ssh["auth"] = {"password": "password"}
+                # Keep original prompt_regex — MockWire is configured to match it
                 patched = True
                 logger.info("Patched workflow node %s → localhost:%d (user=automation-user)",
                             node_name, port)

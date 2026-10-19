@@ -347,15 +347,50 @@ def _build_mockwire_config(
     responses: dict[str, str],
     data_dir: Path,
 ) -> dict:
-    """Build a MockWire YAML config for a node."""
-    # Always use 'automation-user' — the test executor patches workflow
-    # SSH credentials to this same username for simulator testing
-    user = "automation-user"
-    prompt = f"[{user}@{node_name}]# "
+    """Build a MockWire YAML config for a node.
+
+    Reads credentials, prompt, and auth config from the workflow's node
+    definition so the simulator matches what the workflow expects.
+    """
+    ssh_def = node_def.get("ssh", {}) or {}
+
+    # Read user/password from workflow node definition
+    user = ssh_def.get("user", "root")
+    if isinstance(user, str) and user.startswith("${"):
+        user = "root"  # resolve placeholder to sensible default
+
+    password = ""
+    auth_def = ssh_def.get("auth", {})
+    if isinstance(auth_def, dict):
+        password = auth_def.get("password", "password")
+    if isinstance(password, str) and password.startswith("${"):
+        password = "password"
+    if not password:
+        password = "password"
+
+    # Build prompt that matches the workflow's prompt_regex
+    prompt_regex = node_def.get("prompt_regex", "")
+    if prompt_regex:
+        # Derive a prompt string that the workflow's regex will match
+        # Common patterns: (?m)[#>$]\s*$  or  (?m)\S+[#>]\s*$
+        prompt = f"{node_name}# "
+    else:
+        # Default telecom-style prompt
+        prompt = f"[{user}@{node_name}]# "
+
+    # Extract the prompt terminator character for MockWire's config.prompt
+    prompt_char = "#"
+    if prompt_regex:
+        import re as _re
+        # Find the character class in the regex, e.g. [#>$]
+        m = _re.search(r'\[([^\]]+)\]', prompt_regex)
+        if m:
+            chars = m.group(1).replace('\\', '')
+            prompt_char = chars[0] if chars else "#"
 
     config: dict[str, Any] = {
         "config": {
-            "prompt": "#",
+            "prompt": prompt_char,
             "delayMs": 100,
             "jitterMs": 20,
             "idleTimeoutSec": 300,
@@ -364,14 +399,13 @@ def _build_mockwire_config(
             "enabled": True,
             "users": [{
                 "username": user,
-                "password": "automation-pass",
+                "password": password,
                 "prompt": prompt,
             }],
         },
     }
 
     # Add NIAM config if ne_id is present
-    ssh_def = node_def.get("ssh", {}) or {}
     ne_id = ssh_def.get("ne_id", "")
     if ne_id:
         config["niam"] = {
@@ -382,7 +416,7 @@ def _build_mockwire_config(
             },
             "users": [{
                 "username": user,
-                "password": "password",
+                "password": password,
                 "neIds": [ne_id if not ne_id.startswith("${") else f"{node_name}-NIAM-ID"],
             }],
         }
