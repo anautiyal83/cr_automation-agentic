@@ -459,6 +459,72 @@ def _autofix_column_names(yaml_text: str, ciq_path: str) -> str:
                 col_map[old.lower()] = new
             col_maps[sn] = col_map
         _fix_workbook_rule_refs(rules, ciq_sheet_map, col_maps)
+
+        # Validate subset rules against actual CIQ data — remove if values don't overlap
+        try:
+            wb3 = openpyxl.load_workbook(ciq_path, read_only=True, data_only=True)
+            wb_rules = rules.get("workbook_rules", [])
+            if wb_rules and isinstance(wb_rules, list):
+                valid_rules = []
+                for rule in wb_rules:
+                    if not isinstance(rule, dict) or "subset" not in rule:
+                        valid_rules.append(rule)
+                        continue
+                    sub = rule["subset"]
+                    if not isinstance(sub, dict):
+                        valid_rules.append(rule)
+                        continue
+
+                    # Parse from/to references
+                    def _parse_ref(ref):
+                        if isinstance(ref, str) and "." in ref:
+                            parts = ref.split(".", 1)
+                            return parts[0], parts[1]
+                        elif isinstance(ref, dict):
+                            return ref.get("sheet", ""), ref.get("column", "")
+                        return "", ""
+
+                    from_sheet, from_col = _parse_ref(sub.get("from"))
+                    to_sheet, to_col = _parse_ref(sub.get("to"))
+
+                    if not from_sheet or not from_col or not to_sheet or not to_col:
+                        valid_rules.append(rule)
+                        continue
+
+                    # Read actual values from both columns
+                    def _read_col_values(sheet_name, col_name):
+                        sn = ciq_sheet_map.get(sheet_name.lower(), sheet_name)
+                        if sn not in wb3.sheetnames:
+                            return None
+                        ws = wb3[sn]
+                        headers = [str(c.value).strip() if c.value else "" for c in next(ws.iter_rows(min_row=1, max_row=1), [])]
+                        headers_lower = {h.lower(): i for i, h in enumerate(headers)}
+                        idx = headers_lower.get(col_name.lower())
+                        if idx is None:
+                            return None
+                        vals = set()
+                        for row in ws.iter_rows(min_row=2, values_only=True):
+                            if idx < len(row) and row[idx] is not None:
+                                v = str(row[idx]).strip()
+                                if v:
+                                    vals.add(v)
+                        return vals
+
+                    from_vals = _read_col_values(from_sheet, from_col)
+                    to_vals = _read_col_values(to_sheet, to_col)
+
+                    if from_vals is not None and to_vals is not None:
+                        overlap = from_vals & to_vals
+                        if not overlap:
+                            logger.info("Auto-fix: removed subset rule %s.%s → %s.%s (no value overlap)",
+                                        from_sheet, from_col, to_sheet, to_col)
+                            continue  # skip this rule
+                    valid_rules.append(rule)
+                rules["workbook_rules"] = valid_rules if valid_rules else []
+            wb3.close()
+        except Exception:
+            pass
+
         buf = StringIO()
         yaml_out = YAML()
         yaml_out.default_flow_style = False
