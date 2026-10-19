@@ -130,6 +130,379 @@ def _strip_bad_workbook_rules(yaml_text: str, ciq_path: str) -> str:
     return yaml_text
 
 
+def _autofix_column_names(yaml_text: str, ciq_path: str) -> str:
+    """Auto-fix column and sheet names in generated YAML to match actual CIQ.
+
+    Fixes:
+    1. Wrong column names → fuzzy-match to closest CIQ column
+    2. Missing columns → add with default type: string
+    3. Wrong sheet name casing → correct to actual CIQ sheet name
+    """
+    import openpyxl
+    from ruamel.yaml import YAML
+    from io import StringIO
+    from difflib import get_close_matches
+
+    yaml = YAML()
+    yaml.preserve_quotes = True
+    try:
+        rules = yaml.load(StringIO(yaml_text))
+    except Exception:
+        return yaml_text
+
+    if not isinstance(rules, dict):
+        return yaml_text
+
+    try:
+        wb = openpyxl.load_workbook(ciq_path, read_only=True, data_only=True)
+    except Exception:
+        return yaml_text
+
+    # Build CIQ structure
+    ciq_sheets: dict[str, list[str]] = {}  # original_name → [columns]
+    ciq_sheet_map: dict[str, str] = {}     # lower → original
+    for sn in wb.sheetnames:
+        ws = wb[sn]
+        headers = []
+        for cell in next(ws.iter_rows(min_row=1, max_row=1), []):
+            if cell.value:
+                headers.append(str(cell.value).strip())
+        ciq_sheets[sn] = headers
+        ciq_sheet_map[sn.lower()] = sn
+    wb.close()
+
+    sheets_def = rules.get("sheets", {})
+    if not sheets_def or not isinstance(sheets_def, dict):
+        return yaml_text
+
+    fixed = False
+    new_sheets = {}
+    # Track renames per sheet: {sheet_lower: {old_col_lower: new_col_actual}}
+    col_rename_map: dict[str, dict[str, str]] = {}
+
+    for rule_sheet, sheet_def in sheets_def.items():
+        actual_sheet = ciq_sheet_map.get(rule_sheet.lower())
+        if not actual_sheet:
+            new_sheets[rule_sheet] = sheet_def
+            continue
+
+        target_sheet = actual_sheet
+        if not isinstance(sheet_def, dict):
+            new_sheets[target_sheet] = sheet_def
+            if target_sheet != rule_sheet:
+                fixed = True
+            continue
+
+        columns = sheet_def.get("columns", {})
+        if not columns or not isinstance(columns, dict):
+            new_sheets[target_sheet] = sheet_def
+            if target_sheet != rule_sheet:
+                fixed = True
+            continue
+
+        actual_cols = ciq_sheets.get(actual_sheet, [])
+        actual_cols_lower = {c.lower(): c for c in actual_cols}
+        used_cols_lower = set()
+        sheet_renames: dict[str, str] = {}  # old_name → new_name
+
+        new_columns = {}
+        for col_name, col_def in columns.items():
+            cl = col_name.lower()
+            if cl in actual_cols_lower:
+                correct_name = actual_cols_lower[cl]
+                new_columns[correct_name] = col_def
+                used_cols_lower.add(cl)
+                if correct_name != col_name:
+                    sheet_renames[col_name] = correct_name
+                    fixed = True
+            else:
+                matches = get_close_matches(cl, list(actual_cols_lower.keys()), n=1, cutoff=0.6)
+                if matches:
+                    correct_name = actual_cols_lower[matches[0]]
+                    new_columns[correct_name] = col_def
+                    used_cols_lower.add(matches[0])
+                    sheet_renames[col_name] = correct_name
+                    fixed = True
+                    logger.info("Auto-fix: '%s' → '%s' in sheet '%s'", col_name, correct_name, actual_sheet)
+                else:
+                    # No match — drop invented column, map to first unused actual col if possible
+                    remaining = [c for c in actual_cols if c.lower() not in used_cols_lower]
+                    if remaining:
+                        correct_name = remaining[0]
+                        new_columns[correct_name] = col_def
+                        used_cols_lower.add(correct_name.lower())
+                        sheet_renames[col_name] = correct_name
+                        logger.info("Auto-fix: '%s' → '%s' (fallback) in sheet '%s'", col_name, correct_name, actual_sheet)
+                    else:
+                        logger.info("Auto-fix: dropped invented column '%s' from sheet '%s'", col_name, actual_sheet)
+                    fixed = True
+
+        # Add missing CIQ columns
+        for actual_col in actual_cols:
+            if actual_col.lower() not in used_cols_lower:
+                new_columns[actual_col] = {"type": "string"}
+                fixed = True
+                logger.info("Auto-fix: added missing column '%s' to sheet '%s'", actual_col, actual_sheet)
+
+        # Fix row rules (unique_key, one_of, etc.)
+        sheet_rules = sheet_def.get("rules", [])
+        if sheet_rules and isinstance(sheet_rules, list) and sheet_renames:
+            for rule in sheet_rules:
+                if isinstance(rule, dict):
+                    for rule_key in ("unique_key", "one_of"):
+                        if rule_key in rule and isinstance(rule[rule_key], list):
+                            rule[rule_key] = [
+                                sheet_renames.get(c, c) for c in rule[rule_key]
+                            ]
+                    # Fix require/forbid column refs
+                    for rule_key in ("require", "forbid"):
+                        if rule_key in rule and isinstance(rule[rule_key], str):
+                            rule[rule_key] = sheet_renames.get(rule[rule_key], rule[rule_key])
+                    # Fix when.column
+                    when = rule.get("when")
+                    if isinstance(when, dict) and "column" in when:
+                        when["column"] = sheet_renames.get(when["column"], when["column"])
+                    # Fix minOnePerGroup.groupByColumn
+                    for col_def in new_columns.values():
+                        if isinstance(col_def, dict):
+                            mog = col_def.get("minOnePerGroup")
+                            if isinstance(mog, dict) and "groupByColumn" in mog:
+                                mog["groupByColumn"] = sheet_renames.get(mog["groupByColumn"], mog["groupByColumn"])
+
+        sheet_def["columns"] = new_columns
+        new_sheets[target_sheet] = sheet_def
+        col_rename_map[actual_sheet.lower()] = sheet_renames
+        if target_sheet != rule_sheet:
+            fixed = True
+
+    # Auto-fix required columns that have blank values in CIQ data
+    try:
+        wb2 = openpyxl.load_workbook(ciq_path, read_only=True, data_only=True)
+        for sheet_name, sheet_def in new_sheets.items():
+            if not isinstance(sheet_def, dict):
+                continue
+            sn_lower = sheet_name.lower()
+            actual_sn = ciq_sheet_map.get(sn_lower)
+            if not actual_sn or actual_sn not in wb2.sheetnames:
+                continue
+            ws = wb2[actual_sn]
+            columns = sheet_def.get("columns", {})
+            if not columns:
+                continue
+            header_row = list(next(ws.iter_rows(min_row=1, max_row=1), []))
+            header_map = {}
+            for idx, cell in enumerate(header_row):
+                if cell.value:
+                    header_map[str(cell.value).strip().lower()] = idx
+            # Collect actual values per column for validation
+            col_values: dict[str, set] = {}
+            data_rows = list(ws.iter_rows(min_row=2, values_only=True))
+            for col_name_lc, col_idx in header_map.items():
+                vals = set()
+                for row in data_rows:
+                    if not any(c is not None and str(c).strip() for c in row):
+                        continue
+                    if col_idx < len(row) and row[col_idx] is not None:
+                        vals.add(str(row[col_idx]).strip())
+                col_values[col_name_lc] = vals
+
+            for col_name, col_def in columns.items():
+                if not isinstance(col_def, dict):
+                    continue
+                col_idx = header_map.get(col_name.lower())
+                if col_idx is None:
+                    continue
+
+                # Fix required:true on columns with blanks
+                if col_def.get("required"):
+                    for row in data_rows:
+                        if not any(c is not None and str(c).strip() for c in row):
+                            continue
+                        if col_idx < len(row):
+                            val = row[col_idx]
+                            if val is None or (isinstance(val, str) and not val.strip()):
+                                col_def["required"] = False
+                                fixed = True
+                                logger.info("Auto-fix: '%s' in '%s' → required:false (has blanks)", col_name, sheet_name)
+                                break
+
+                # Remove allowedValues that don't match actual CIQ data
+                allowed = col_def.get("allowedValues")
+                if allowed and isinstance(allowed, list):
+                    actual_vals = col_values.get(col_name.lower(), set())
+                    if actual_vals:
+                        unmatched = actual_vals - set(str(a) for a in allowed)
+                        if unmatched:
+                            del col_def["allowedValues"]
+                            fixed = True
+                            logger.info("Auto-fix: removed allowedValues from '%s' in '%s' (CIQ has values not in list: %s)",
+                                        col_name, sheet_name, list(unmatched)[:3])
+
+                # Fix wrong type — if type:integer but column has non-numeric values, change to string
+                col_type = col_def.get("type")
+                if col_type in ("integer", "decimal"):
+                    actual_vals = col_values.get(col_name.lower(), set())
+                    if actual_vals:
+                        non_numeric = [v for v in actual_vals if v and not v.replace(".", "").replace("-", "").isdigit()]
+                        if non_numeric:
+                            col_def["type"] = "string"
+                            fixed = True
+                            logger.info("Auto-fix: '%s' in '%s' → type:string (has non-numeric: %s)",
+                                        col_name, sheet_name, non_numeric[:3])
+
+                # Remove pattern if actual values don't match it
+                import re as _re
+                pattern = col_def.get("pattern")
+                if pattern and isinstance(pattern, str):
+                    actual_vals = col_values.get(col_name.lower(), set())
+                    if actual_vals:
+                        try:
+                            pat = _re.compile(pattern)
+                            mismatches = [v for v in actual_vals if v and not pat.match(v)]
+                            if mismatches:
+                                del col_def["pattern"]
+                                fixed = True
+                                logger.info("Auto-fix: removed pattern from '%s' in '%s' (values don't match: %s)",
+                                            col_name, sheet_name, mismatches[:3])
+                        except _re.error:
+                            del col_def["pattern"]
+                            fixed = True
+
+        # Auto-fix unique_key rules — remove keys that have duplicates or blanks
+        for sheet_name, sheet_def in new_sheets.items():
+            if not isinstance(sheet_def, dict):
+                continue
+            actual_sn = ciq_sheet_map.get(sheet_name.lower())
+            if not actual_sn or actual_sn not in wb2.sheetnames:
+                continue
+            ws = wb2[actual_sn]
+            header_row = list(next(ws.iter_rows(min_row=1, max_row=1), []))
+            header_map = {}
+            for idx, cell in enumerate(header_row):
+                if cell.value:
+                    header_map[str(cell.value).strip().lower()] = idx
+
+            sheet_rules = sheet_def.get("rules", [])
+            if not sheet_rules or not isinstance(sheet_rules, list):
+                continue
+
+            new_rules = []
+            for rule in sheet_rules:
+                if not isinstance(rule, dict) or "unique_key" not in rule:
+                    new_rules.append(rule)
+                    continue
+                uk_cols = rule["unique_key"]
+                if not isinstance(uk_cols, list):
+                    new_rules.append(rule)
+                    continue
+                # Check if unique_key columns actually form a unique key in CIQ data
+                col_indices = []
+                valid = True
+                for uc in uk_cols:
+                    idx = header_map.get(uc.lower())
+                    if idx is None:
+                        valid = False
+                        break
+                    col_indices.append(idx)
+                if not valid:
+                    fixed = True
+                    logger.info("Auto-fix: removed unique_key %s from '%s' (column not found)", uk_cols, sheet_name)
+                    continue
+                # Check for duplicates
+                seen_keys = set()
+                has_dup = False
+                for row in ws.iter_rows(min_row=2, values_only=True):
+                    if not any(c is not None and str(c).strip() for c in row):
+                        continue
+                    key = tuple(
+                        str(row[i]).strip() if i < len(row) and row[i] is not None else ""
+                        for i in col_indices
+                    )
+                    if key in seen_keys:
+                        has_dup = True
+                        break
+                    seen_keys.add(key)
+                if has_dup:
+                    fixed = True
+                    logger.info("Auto-fix: removed unique_key %s from '%s' (has duplicates in CIQ)", uk_cols, sheet_name)
+                else:
+                    new_rules.append(rule)
+            if len(new_rules) != len(sheet_rules):
+                sheet_def["rules"] = new_rules if new_rules else None
+                if not new_rules and "rules" in sheet_def:
+                    del sheet_def["rules"]
+
+        wb2.close()
+    except Exception:
+        pass
+
+    # Add missing CIQ sheets
+    rules_sheets_lower = {s.lower() for s in new_sheets}
+    for ciq_sn, ciq_cols in ciq_sheets.items():
+        if ciq_sn.lower() not in rules_sheets_lower:
+            new_sheets[ciq_sn] = {
+                "required": True,
+                "columns": {c: {"type": "string"} for c in ciq_cols},
+            }
+            fixed = True
+            logger.info("Auto-fix: added missing sheet '%s' with %d columns", ciq_sn, len(ciq_cols))
+
+    if fixed:
+        rules["sheets"] = new_sheets
+        # Build full col maps for workbook_rules fix
+        col_maps = {}
+        for sn, cols in ciq_sheets.items():
+            renames = col_rename_map.get(sn.lower(), {})
+            col_map = {c.lower(): c for c in cols}
+            # Also add old→new renames (lowercase old → actual new)
+            for old, new in renames.items():
+                col_map[old.lower()] = new
+            col_maps[sn] = col_map
+        _fix_workbook_rule_refs(rules, ciq_sheet_map, col_maps)
+        buf = StringIO()
+        yaml_out = YAML()
+        yaml_out.default_flow_style = False
+        yaml_out.dump(rules, buf)
+        result = buf.getvalue()
+        logger.info("Auto-fix applied: corrected column/sheet names and rule references")
+        return result
+
+    return yaml_text
+
+
+def _fix_workbook_rule_refs(rules: dict, sheet_map: dict, col_maps: dict):
+    """Fix sheet/column references in workbook_rules after auto-fix."""
+    wb_rules = rules.get("workbook_rules", [])
+    if not wb_rules:
+        return
+    for rule in wb_rules:
+        if not isinstance(rule, dict):
+            continue
+        for key in ("subset", "set"):
+            if key not in rule:
+                continue
+            ref = rule[key]
+            if not isinstance(ref, dict):
+                continue
+            for direction in ("from", "to"):
+                val = ref.get(direction)
+                if isinstance(val, str) and "." in val:
+                    # Dotted ref like "Index.Node"
+                    parts = val.split(".", 1)
+                    sheet_lower = parts[0].lower()
+                    actual_sheet = sheet_map.get(sheet_lower, parts[0])
+                    col_lower = parts[1].lower()
+                    actual_col = col_maps.get(actual_sheet, {}).get(col_lower, parts[1])
+                    ref[direction] = f"{actual_sheet}.{actual_col}"
+                elif isinstance(val, dict):
+                    sheet = str(val.get("sheet", ""))
+                    actual_sheet = sheet_map.get(sheet.lower(), sheet)
+                    val["sheet"] = actual_sheet
+                    col = str(val.get("column", ""))
+                    actual_col = col_maps.get(actual_sheet, {}).get(col.lower(), col)
+                    val["column"] = actual_col
+
+
 def _validate_against_ciq(yaml_text: str, ciq_path: str) -> list[str]:
     """Check that sheet/column names in validation rules match the actual CIQ.
 
@@ -524,19 +897,41 @@ report_output:
         if constraints_data:
             constraints_text = json.dumps(constraints_data, indent=2, default=str)[:3000]
 
+        # Build a strict column reference block to place at the TOP of the prompt
+        column_ref_lines = [
+            "╔══════════════════════════════════════════════════════════════╗",
+            "║  MANDATORY: USE ONLY THESE EXACT COLUMN & SHEET NAMES      ║",
+            "╚══════════════════════════════════════════════════════════════╝",
+        ]
+        if per_sheet:
+            for sname, sdata in per_sheet.items():
+                headers = sdata.get("headers", []) if isinstance(sdata, dict) else getattr(sdata, "headers", [])
+                column_ref_lines.append(f'  Sheet "{sname}" columns: {headers}')
+            column_ref_lines.append("")
+            column_ref_lines.append("RULES:")
+            column_ref_lines.append("- Copy-paste these names EXACTLY into your YAML")
+            column_ref_lines.append("- DO NOT rename, abbreviate, or invent column names")
+            column_ref_lines.append("- Every column listed above MUST appear in your sheets section")
+            column_ref_lines.append("- The example below uses DIFFERENT column names — ignore its names, use YOURS")
+        column_ref = "\n".join(column_ref_lines)
+
         prompt = (
             f"Generate a validation-rules.yaml for UC: {uc_name}\n"
             f"Node Type: {node_type}, Activity: {activity}\n\n"
+
+            f"{column_ref}\n\n"
+
+            f"{retry_info}{qa_feedback}\n\n"
 
             f"=== CIQ DATA (sheets, headers, sample rows) ===\n{ir_summary}\n\n"
 
             f"=== USER CONSTRAINTS ===\n{constraints_text or 'None provided'}\n\n"
 
-            f"=== REAL WORKING EXAMPLE ===\n{example}\n\n"
+            f"=== REAL WORKING EXAMPLE (STRUCTURE REFERENCE ONLY — column names differ from yours!) ===\n{example}\n\n"
 
             f"=== SCHEMA REFERENCE (column types, workbook_rules, etc.) ===\n{schema[:8000]}\n\n"
 
-            f"{few_shot_text}{retry_info}{qa_feedback}\n\n"
+            f"{few_shot_text}\n\n"
 
             "=== GENERATION INSTRUCTIONS ===\n\n"
 
@@ -632,17 +1027,10 @@ report_output:
             "- Pattern regex values MUST be quoted: pattern: \"^CR[0-9]+$\"\n"
             "- When in doubt, quote the value — extra quotes never break YAML\n\n"
 
-            "CRITICAL — COLUMN NAMES:\n"
-            "- Use EXACT column names from the CIQ DATA section above — copy-paste them exactly\n"
-            "- DO NOT use column names from the example (Node, NIAM NAME, etc.) — those are from a DIFFERENT UC\n"
-            "- If the CIQ has 'ZONE', use 'ZONE' — NOT 'Node' or 'Zone_Name'\n"
-            "- If the CIQ has 'Node_Name', use 'Node_Name' — NOT 'Node'\n"
-            "- If the CIQ has 'NIAM_NAME1', use 'NIAM_NAME1' — NOT 'NIAM NAME' or 'NIAM_ID'\n"
-            "- Use EXACT sheet names from the CIQ data — do NOT invent or rename sheets\n"
-            "- Every column in the CIQ MUST appear in the sheets section\n"
-            "- DO NOT add comments like '# Assuming...' — use the actual names from the data\n"
-            "- DO NOT generate pattern regex from sample data values — only for known types (IP, email, CRGroup, file paths)\n"
-            "- DO NOT generate allowedValues from sample data rows unless explicitly in constraints\n"
+            "FINAL REMINDER — COLUMN NAMES:\n"
+            "- Refer back to the MANDATORY column names at the TOP of this prompt\n"
+            "- Use EXACT names — do NOT use example names (Node, NIAM NAME, etc.)\n"
+            "- Every CIQ column MUST appear in your sheets section\n"
             "- Return ONLY valid YAML — no markdown fences, no explanatory text, no ```yaml blocks"
         )
         system = (
@@ -668,17 +1056,18 @@ report_output:
                 output_data={"validation_rules_yaml": yaml_content},
             )
 
-        # Auto-fix: strip problematic workbook rules before validation
+        # Auto-fix: correct column/sheet names and strip bad workbook rules
         ciq_path = input_data.get("ciq_file_path", "")
         if ciq_path and Path(ciq_path).exists():
+            yaml_content = _autofix_column_names(yaml_content, ciq_path)
             yaml_content = _strip_bad_workbook_rules(yaml_content, ciq_path)
 
-        # Validate column/sheet names against actual CIQ
+        # Validate column/sheet names against actual CIQ (after auto-fix)
         if ciq_path and Path(ciq_path).exists():
             mismatches = _validate_against_ciq(yaml_content, ciq_path)
             if mismatches:
                 error_msg = "Column/sheet name mismatches with CIQ:\n" + "\n".join(mismatches)
-                logger.warning("Validation rules mismatch: %s", error_msg)
+                logger.warning("Validation rules mismatch (after auto-fix): %s", error_msg)
                 return StepOutput(
                     status="failed",
                     error={"message": error_msg, "mismatches": mismatches},

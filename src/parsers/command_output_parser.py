@@ -10,7 +10,12 @@ def parse_command_outputs(file_path: str | Path) -> dict:
 
     Returns dict with: commands, errors
     """
-    text = Path(file_path).read_text(encoding="utf-8")
+    if not file_path or not Path(file_path).is_file():
+        return {"commands": [], "errors": []}
+    try:
+        text = Path(file_path).read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        text = Path(file_path).read_text(encoding="utf-8", errors="replace")
     commands = _extract_command_pairs(text)
 
     return {

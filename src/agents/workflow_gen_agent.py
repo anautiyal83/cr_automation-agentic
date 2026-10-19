@@ -499,6 +499,30 @@ def _fix_workflow_yaml(yaml_text: str) -> str:
 
     yaml_text = "\n".join(_quote_colon_values(l) for l in yaml_text.split("\n"))
 
+    # Fix broken single-quoted regex strings containing backslashes or nested quotes
+    # e.g., regex: 'tar: Removing leading `/\' from...' → regex: "tar: Removing leading `/\\' from..."
+    def _fix_single_quoted_regex(line: str) -> str:
+        stripped = line.lstrip()
+        if not stripped:
+            return line
+        # Match regex: '...' or - regex: '...'
+        m = re.match(r'^(\s*-?\s*regex:\s+)\'(.*)$', line)
+        if not m:
+            return line
+        indent = m.group(1)
+        rest = m.group(2)
+        # Find the matching closing quote — but beware of unescaped quotes inside
+        # If the value has backslashes or problematic chars, switch to double-quoted
+        if rest.endswith("'"):
+            content = rest[:-1]
+            if '\\' in content or ("'" in content and "''" not in content):
+                # Use double quotes, escape internal double quotes
+                content = content.replace('\\', '\\\\').replace('"', '\\"')
+                return f'{indent}"{content}"'
+        return line
+
+    yaml_text = "\n".join(_fix_single_quoted_regex(l) for l in yaml_text.split("\n"))
+
     # Fix invalid escape sequences in double-quoted strings
     # YAML double quotes only allow specific escapes (\n \t \\ \" etc.)
     # LLM often uses regex escapes like \$ \( \) \| which are invalid in YAML double quotes
