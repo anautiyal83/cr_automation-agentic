@@ -504,7 +504,7 @@ def _fix_workflow_yaml(yaml_text: str) -> str:
 
     # Fix single-quoted values with nested single quotes inside
     # e.g., send: 'echo "${data['col']}"' → send: "echo \"${data['col']}\""
-    # Also handles regex values with backslashes
+    # Note: backslashes are FINE in single-quoted YAML (literal, not escapes)
     def _fix_nested_quotes(line: str) -> str:
         stripped = line.lstrip()
         if not stripped or stripped.startswith("#"):
@@ -518,12 +518,11 @@ def _fix_workflow_yaml(yaml_text: str) -> str:
             return line
         indent_key = m.group(1)
         content = m.group(2)
-        # Check if content has unescaped single quotes (not doubled '')
-        has_nested_sq = "'" in content and "''" not in content
-        has_backslash = '\\' in content
-        if has_nested_sq or has_backslash:
-            # Switch to double-quoted — escape existing double quotes
-            content = content.replace('"', '\\"')
+        # Only fix if there are actual nested single quotes (not doubled '')
+        # Backslashes in single-quoted YAML are literal — do NOT switch to double-quotes for them
+        if "'" in content and "''" not in content:
+            # Switch to double-quoted — escape internal double quotes and backslashes
+            content = content.replace('\\', '\\\\').replace('"', '\\"')
             return f'{indent_key}"{content}"'
         return line
 
