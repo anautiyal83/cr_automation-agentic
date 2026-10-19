@@ -371,6 +371,7 @@ def _build_mockwire_config(
     }
 
     # Add NIAM config if ne_id is present
+    ssh_def = node_def.get("ssh", {}) or {}
     ne_id = ssh_def.get("ne_id", "")
     if ne_id:
         config["niam"] = {
