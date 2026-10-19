@@ -502,29 +502,32 @@ def _fix_workflow_yaml(yaml_text: str) -> str:
 
     yaml_text = "\n".join(_quote_colon_values(l) for l in yaml_text.split("\n"))
 
-    # Fix broken single-quoted regex strings containing backslashes or nested quotes
-    # e.g., regex: 'tar: Removing leading `/\' from...' → regex: "tar: Removing leading `/\\' from..."
-    def _fix_single_quoted_regex(line: str) -> str:
+    # Fix single-quoted values with nested single quotes inside
+    # e.g., send: 'echo "${data['col']}"' → send: "echo \"${data['col']}\""
+    # Also handles regex values with backslashes
+    def _fix_nested_quotes(line: str) -> str:
         stripped = line.lstrip()
-        if not stripped:
+        if not stripped or stripped.startswith("#"):
             return line
-        # Match regex: '...' or - regex: '...'
-        m = re.match(r'^(\s*-?\s*regex:\s+)\'(.*)$', line)
+        # Match key: 'value...' pattern
+        m = re.match(r"^(\s*[\w-]+:\s+)'(.+)'\s*$", line)
+        if not m:
+            # Also try list item: - key: 'value...'
+            m = re.match(r"^(\s*-\s+[\w-]+:\s+)'(.+)'\s*$", line)
         if not m:
             return line
-        indent = m.group(1)
-        rest = m.group(2)
-        # Find the matching closing quote — but beware of unescaped quotes inside
-        # If the value has backslashes or problematic chars, switch to double-quoted
-        if rest.endswith("'"):
-            content = rest[:-1]
-            if '\\' in content or ("'" in content and "''" not in content):
-                # Use double quotes, escape internal double quotes
-                content = content.replace('\\', '\\\\').replace('"', '\\"')
-                return f'{indent}"{content}"'
+        indent_key = m.group(1)
+        content = m.group(2)
+        # Check if content has unescaped single quotes (not doubled '')
+        has_nested_sq = "'" in content and "''" not in content
+        has_backslash = '\\' in content
+        if has_nested_sq or has_backslash:
+            # Switch to double-quoted — escape existing double quotes
+            content = content.replace('"', '\\"')
+            return f'{indent_key}"{content}"'
         return line
 
-    yaml_text = "\n".join(_fix_single_quoted_regex(l) for l in yaml_text.split("\n"))
+    yaml_text = "\n".join(_fix_nested_quotes(l) for l in yaml_text.split("\n"))
 
     # Fix invalid escape sequences in double-quoted strings
     # YAML double quotes only allow specific escapes (\n \t \\ \" etc.)
