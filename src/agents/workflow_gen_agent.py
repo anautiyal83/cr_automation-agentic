@@ -659,8 +659,19 @@ def _rename_invalid_step_fields(yaml_text: str) -> str:
         if not isinstance(phases, dict):
             return yaml_text
 
-        _RENAME_MAP = {"if": "when", "loop": "for_each", "cmd": "send", "command": "send"}
-        _REMOVE_SET = {"id", "step_id", "step_name", "send_options", "type", "action"}
+        _RENAME_MAP = {
+            "if": "when", "loop": "for_each", "cmd": "send", "command": "send",
+            "name": "command_description", "description": "command_description",
+        }
+        # Whitelist of valid StepDefinition fields in Java model
+        _VALID_STEP_FIELDS = {
+            "node", "command_description", "send", "on_failure", "timeout_sec",
+            "register", "validation", "retries", "retry_delay_sec", "when",
+            "skip_when", "expect_reply", "prompt_regex", "for_each", "enabled",
+            "interaction_timeout_sec", "steps",
+            "item_var", "max_iterations", "continue_when", "break_when",
+            "rest", "sftp", "email",
+        }
 
         changed = False
 
@@ -675,12 +686,12 @@ def _rename_invalid_step_fields(yaml_text: str) -> str:
                         step[new] = step.pop(old)
                         changed = True
                         logger.info("Renamed step field '%s' -> '%s'", old, new)
-                # Remove invalid fields
-                for bad in list(step.keys()):
-                    if bad in _REMOVE_SET:
-                        del step[bad]
+                # Remove any field not in the whitelist
+                for key in list(step.keys()):
+                    if key not in _VALID_STEP_FIELDS:
+                        del step[key]
                         changed = True
-                        logger.info("Removed invalid step field '%s'", bad)
+                        logger.info("Removed invalid step field '%s'", key)
                 # Recurse
                 nested = step.get("steps", [])
                 if isinstance(nested, list):
