@@ -507,8 +507,8 @@ class TestExecutor:
                 else:
                     ssh["auth"] = {"password": "automation-pass"}
                 # Override prompt_regex to match MockWire simulator prompt
-                # MockWire prompt format: <node_name:user> #
-                node_def["prompt_regex"] = "(?m)[#>]\\s*$"
+                # MockWire prompt format: [automation-user@node ~]$  or ends with # > $
+                node_def["prompt_regex"] = "(?m)[#>$]\\s*$"
                 patched = True
                 logger.info("Patched workflow node %s → localhost:%d (user=automation-user)",
                             node_name, port)

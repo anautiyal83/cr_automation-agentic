@@ -351,7 +351,7 @@ def _build_mockwire_config(
     # Always use 'automation-user' — the test executor patches workflow
     # SSH credentials to this same username for simulator testing
     user = "automation-user"
-    prompt = f"[{user}@{node_name} ~]$ "
+    prompt = f"[{user}@{node_name}]# "
 
     config: dict[str, Any] = {
         "config": {
