@@ -240,8 +240,9 @@ data:
         response = await call_llm(prompt, system_prompt=system, model=model)
         yaml_content = _extract_yaml(response)
 
-        # Fix common YAML quoting issues
+        # Fix common YAML issues
         yaml_content = _fix_yaml_quoting(yaml_content)
+        yaml_content = _fix_yaml_syntax(yaml_content)
 
         # Auto-fix column references to match actual CIQ
         ciq_path = input_data.get("ciq_file_path", "")
@@ -349,6 +350,79 @@ def _autofix_json_template(yaml_text: str, ciq_path: str) -> str:
 
     changed = False
 
+    # Identify the data sheet (not Index, not IP)
+    data_sheets = [sn for sn in ciq_sheets if sn.lower() not in ("index", "ip")]
+    data_sheet = data_sheets[0] if data_sheets else ""
+
+    # Identify the grouping column (first column in Index sheet)
+    index_cols = ciq_sheets.get(ciq_sheet_map.get("index", "Index"), [])
+    grouping_col = index_cols[0] if index_cols else "ZONE"
+
+    # ── STRUCTURAL FIXES ──
+    # The json-output YAML has a nested dict structure (not lists):
+    # data.crGroups.nodeGroups.nodes (each level is a dict with _each, and child keys)
+    def _fix_structure(obj: dict, path: str = ""):
+        """Recursively fix structural issues in the json-output template."""
+        nonlocal changed
+        if not isinstance(obj, dict):
+            return
+
+        # Fix niamID-N or niamIDN → single niamID (at any level that has nodes)
+        niam_keys = [k for k in obj if k != "niamID" and (k.startswith("niamID-") or (k.startswith("niamID") and k[-1].isdigit()))]
+        if niam_keys:
+            if "niamID" not in obj:
+                # Use first NIAM column
+                first_val = obj[niam_keys[0]]
+                obj["niamID"] = first_val
+                logger.info("Auto-fix json-output: merged %s -> niamID = %s", niam_keys, first_val)
+            for k in niam_keys:
+                del obj[k]
+            changed = True
+
+        # Fix configData → tables structure
+        if "configData" in obj and "tables" not in obj:
+            obj.pop("configData")
+            # Build proper tables structure
+            ng_var = "$ng"
+            # Find the iteration variable from the _each of this level
+            each_val = obj.get("_each", "")
+            if isinstance(each_val, str) and " AS " in each_val:
+                ng_var = each_val.split(" AS ")[-1].strip()
+            obj["tables"] = {
+                "_each": f'"{data_sheet}"' if data_sheet else '"data"',
+                "table": data_sheet or "data",
+                "records": {
+                    "_each": f'"{data_sheet} WHERE {grouping_col} = {ng_var}"' if data_sheet else '"data"',
+                    "data": {"_row": "*"},
+                },
+            }
+            changed = True
+            logger.info("Auto-fix json-output: converted configData to tables structure")
+
+        # Recurse into child dicts
+        for v in obj.values():
+            if isinstance(v, dict):
+                _fix_structure(v)
+
+    data_section = data.get("data", {})
+    if isinstance(data_section, dict):
+        _fix_structure(data_section)
+
+    # ── STRUCTURAL FIX 3: Ensure tableKeys exists ──
+    meta = data.get("data", {}).get("meta", {})
+    if isinstance(meta, dict) and "tableKeys" not in meta and data_sheet:
+        # Build tableKeys from data sheet columns
+        ds_cols = ciq_sheets.get(data_sheet, [])
+        # Use first 2 columns as primary keys
+        pk_cols = ds_cols[:2] if len(ds_cols) >= 2 else ds_cols[:1] if ds_cols else ["id"]
+        meta["tableKeys"] = {
+            data_sheet: {
+                "recordPrimaryKeys": ",".join(pk_cols),
+            }
+        }
+        changed = True
+        logger.info("Auto-fix json-output: added tableKeys for '%s'", data_sheet)
+
     def _fix_string_value(val: str) -> str:
         """Fix column/sheet references in a string value."""
         nonlocal changed
@@ -446,6 +520,40 @@ def _autofix_json_template(yaml_text: str, ciq_path: str) -> str:
         logger.info("Auto-fix applied to json-output.yaml")
         return buf.getvalue()
 
+    return yaml_text
+
+
+def _fix_yaml_syntax(yaml_text: str) -> str:
+    """Fix common YAML syntax issues in LLM-generated json-output templates."""
+    # Strip control characters
+    yaml_text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', yaml_text)
+    # Fix tabs → spaces
+    yaml_text = yaml_text.replace("\t", "  ")
+    # Strip trailing whitespace
+    yaml_text = "\n".join(line.rstrip() for line in yaml_text.split("\n"))
+
+    # Fix nested quotes: value containing unescaped quotes
+    # e.g., _each: "Profile Modification WHERE "Profile Modification.Zone" = $zone"
+    # → _each: 'Profile Modification WHERE Profile Modification.Zone = $zone'
+    def _fix_line(line: str) -> str:
+        stripped = line.lstrip()
+        if not stripped or stripped.startswith("#"):
+            return line
+        # Match key: "value with "nested" quotes"
+        m = re.match(r'^(\s*[\w_-]+:\s+)"(.+)"(\s*)$', line)
+        if m:
+            indent = m.group(1)
+            content = m.group(2)
+            trail = m.group(3)
+            # Check for nested double quotes (not escaped)
+            inner = content[:-1] if content.endswith('"') else content
+            if '"' in inner:
+                # Switch to single quotes, remove inner double quotes
+                clean = content.replace('"', '')
+                return f"{indent}'{clean}'{trail}"
+        return line
+
+    yaml_text = "\n".join(_fix_line(l) for l in yaml_text.split("\n"))
     return yaml_text
 
 
