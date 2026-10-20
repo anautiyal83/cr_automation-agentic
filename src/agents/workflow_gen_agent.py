@@ -556,6 +556,9 @@ def _fix_workflow_yaml(yaml_text: str) -> str:
     # Strip invalid fields from validation branches (success/failure/warning)
     yaml_text = _strip_invalid_validation_fields(yaml_text)
 
+    # Fix register items: ensure regex has named capture group matching the 'name' field
+    yaml_text = _fix_register_capture_groups(yaml_text)
+
     # Fix Java 8 regex named group names — underscores not allowed
     # Convert (?<SOME_NAME>...) → (?<someName>...)
     yaml_text = _fix_regex_group_names(yaml_text)
@@ -780,6 +783,71 @@ def _fix_missing_node_in_steps(yaml_text: str) -> str:
             return out.getvalue()
     except Exception as e:
         logger.warning("Failed to fix missing node in steps: %s", e)
+    return yaml_text
+
+
+def _fix_register_capture_groups(yaml_text: str) -> str:
+    """Fix register items to ensure regex has a named capture group matching the 'name' field.
+
+    The Java framework requires register items to have a named capture group (?<varName>...)
+    in the regex to capture values into variables. LLM often generates:
+      - regex: 'some text'  name: varName  → should be regex: '(?<varName>some text)'
+      - regex: 'pattern' without name → just a match pattern, OK
+      - regex already has (?<...>) → leave as-is
+    """
+    from ruamel.yaml import YAML
+    try:
+        yaml = YAML()
+        yaml.preserve_quotes = True
+        data = yaml.load(StringIO(yaml_text))
+        if not isinstance(data, dict):
+            return yaml_text
+
+        phases = data.get("phases", {})
+        if not isinstance(phases, dict):
+            return yaml_text
+
+        changed = False
+
+        def _fix_steps(steps: list):
+            nonlocal changed
+            for step in steps:
+                if not isinstance(step, dict):
+                    continue
+                reg = step.get("register")
+                if not isinstance(reg, list):
+                    continue
+                for item in reg:
+                    if not isinstance(item, dict):
+                        continue
+                    regex = item.get("regex", "")
+                    name = item.get("name", "")
+                    if not regex or not name:
+                        continue
+                    # Skip if regex already has any named capture group
+                    if "(?<" in regex:
+                        continue
+                    # Wrap the entire regex in a named capture group
+                    item["regex"] = f"(?<{name}>{regex})"
+                    changed = True
+                    logger.info("Auto-fix: added capture group (?<%s>...) to register regex", name)
+                # Recurse
+                nested = step.get("steps", [])
+                if isinstance(nested, list):
+                    _fix_steps(nested)
+
+        for pdef in phases.values():
+            if isinstance(pdef, dict):
+                steps = pdef.get("steps", [])
+                if isinstance(steps, list):
+                    _fix_steps(steps)
+
+        if changed:
+            out = StringIO()
+            yaml.dump(data, out)
+            return out.getvalue()
+    except Exception as e:
+        logger.warning("Failed to fix register capture groups: %s", e)
     return yaml_text
 
 

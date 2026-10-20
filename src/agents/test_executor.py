@@ -518,6 +518,22 @@ class TestExecutor:
             patched = True
             logger.info("Patched node %s -> localhost:%d (user=%s)", node_name, port, ssh.get("user", "?"))
 
+        # Change all on_failure: stop → continue for simulator testing
+        # (validation failures shouldn't halt the test — we want to run all commands)
+        def _patch_on_failure(obj):
+            nonlocal patched
+            if isinstance(obj, dict):
+                if obj.get("on_failure") == "stop":
+                    obj["on_failure"] = "continue"
+                    patched = True
+                for v in obj.values():
+                    _patch_on_failure(v)
+            elif isinstance(obj, list):
+                for item in obj:
+                    _patch_on_failure(item)
+        _patch_on_failure(wf)
+        logger.info("Patched all on_failure=stop to continue for simulator testing")
+
         if patched:
             with open(str(workflow_path), "w", encoding="utf-8") as f:
                 ryaml.dump(wf, f)
