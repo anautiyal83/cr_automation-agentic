@@ -183,8 +183,18 @@ def _autofix_column_names(yaml_text: str, ciq_path: str) -> str:
     for rule_sheet, sheet_def in sheets_def.items():
         actual_sheet = ciq_sheet_map.get(rule_sheet.lower())
         if not actual_sheet:
-            new_sheets[rule_sheet] = sheet_def
-            continue
+            # Sheet doesn't exist in CIQ — try fuzzy match
+            from difflib import get_close_matches as _gcm
+            sheet_matches = _gcm(rule_sheet.lower().replace("_", " "), list(ciq_sheet_map.keys()), n=1, cutoff=0.4)
+            if sheet_matches:
+                actual_sheet = ciq_sheet_map[sheet_matches[0]]
+                logger.info("Auto-fix: sheet '%s' -> '%s' (fuzzy match)", rule_sheet, actual_sheet)
+                fixed = True
+            else:
+                # No match at all — drop this invented sheet
+                logger.info("Auto-fix: dropped invented sheet '%s' (not in CIQ: %s)", rule_sheet, list(ciq_sheet_map.values()))
+                fixed = True
+                continue
 
         target_sheet = actual_sheet
         if not isinstance(sheet_def, dict):
