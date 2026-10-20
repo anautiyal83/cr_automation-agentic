@@ -170,7 +170,7 @@ class TestExecutor:
 
         failures: list[dict[str, Any]] = []
         results: dict[str, Any] = {}
-        timeout = 300
+        timeout = 120  # 2 min for simulator testing (per-step timeouts prevent hanging)
         sim_processes: list[subprocess.Popen] = []
 
         artifacts = input_data.get("artifacts", {})
@@ -518,21 +518,29 @@ class TestExecutor:
             patched = True
             logger.info("Patched node %s -> localhost:%d (user=%s)", node_name, port, ssh.get("user", "?"))
 
-        # Change all on_failure: stop → continue for simulator testing
-        # (validation failures shouldn't halt the test — we want to run all commands)
-        def _patch_on_failure(obj):
+        # Patch for simulator testing:
+        # 1. on_failure: stop → continue (don't halt on validation failures)
+        # 2. Set timeout_sec on all steps (prevent hanging on unrecognized commands)
+        def _patch_for_simulator(obj):
             nonlocal patched
             if isinstance(obj, dict):
                 if obj.get("on_failure") == "stop":
                     obj["on_failure"] = "continue"
                     patched = True
+                # Set per-step timeout to prevent hanging
+                if "send" in obj and "timeout_sec" not in obj:
+                    obj["timeout_sec"] = 10
+                    patched = True
+                elif "send" in obj and (obj.get("timeout_sec") or 0) > 30:
+                    obj["timeout_sec"] = 30
+                    patched = True
                 for v in obj.values():
-                    _patch_on_failure(v)
+                    _patch_for_simulator(v)
             elif isinstance(obj, list):
                 for item in obj:
-                    _patch_on_failure(item)
-        _patch_on_failure(wf)
-        logger.info("Patched all on_failure=stop to continue for simulator testing")
+                    _patch_for_simulator(item)
+        _patch_for_simulator(wf)
+        logger.info("Patched for simulator: on_failure=continue, timeout_sec=10-30")
 
         if patched:
             with open(str(workflow_path), "w", encoding="utf-8") as f:
