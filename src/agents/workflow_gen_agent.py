@@ -541,6 +541,9 @@ def _fix_workflow_yaml(yaml_text: str) -> str:
 
     yaml_text = re.sub(r'"((?:[^"\\]|\\.)*)"', _fix_double_quoted_regex, yaml_text)
 
+    # Strip invalid fields from node definitions
+    yaml_text = _fix_node_definitions(yaml_text)
+
     # Fix for_each at phase level — move into a wrapper step
     yaml_text = _fix_for_each_at_phase_level(yaml_text)
 
@@ -585,6 +588,65 @@ def _fix_boolean_operators(yaml_text: str) -> str:
 
     yaml_text = re.sub(r"expr:\s*'([^']*)'", _fix_expr, yaml_text)
     yaml_text = re.sub(r'expr:\s*"([^"]*)"', lambda m: f'expr: \'{m.group(1)}\'', yaml_text)
+    return yaml_text
+
+
+def _fix_node_definitions(yaml_text: str) -> str:
+    """Strip invalid fields from node definitions and move misplaced fields into ssh.
+
+    Java NodeDefinition valid fields: type, plugin, ssh, prompt_regex
+    SSH fields: host, port, user, auth, ne_id, strict_host_key_checking
+    LLM often puts ne_id, host, user directly on the node instead of inside ssh.
+    """
+    from ruamel.yaml import YAML
+    try:
+        yaml = YAML()
+        yaml.preserve_quotes = True
+        data = yaml.load(StringIO(yaml_text))
+        if not isinstance(data, dict):
+            return yaml_text
+
+        nodes = data.get("nodes", {})
+        if not isinstance(nodes, dict):
+            return yaml_text
+
+        _VALID_NODE_FIELDS = {"type", "plugin", "ssh", "prompt_regex"}
+        _SSH_FIELDS = {"host", "port", "user", "auth", "ne_id", "strict_host_key_checking", "password"}
+
+        changed = False
+        for node_name, node_def in nodes.items():
+            if not isinstance(node_def, dict):
+                continue
+            ssh = node_def.get("ssh", {})
+            if not isinstance(ssh, dict):
+                ssh = {}
+
+            # Move SSH-related fields from node level into ssh section
+            for field in list(node_def.keys()):
+                if field in _SSH_FIELDS:
+                    if field not in ssh:
+                        ssh[field] = node_def[field]
+                    del node_def[field]
+                    changed = True
+                    logger.info("Auto-fix: moved node.%s.%s into ssh section", node_name, field)
+
+            if ssh and "ssh" not in node_def:
+                node_def["ssh"] = ssh
+                changed = True
+
+            # Remove any remaining invalid fields
+            for field in list(node_def.keys()):
+                if field not in _VALID_NODE_FIELDS:
+                    del node_def[field]
+                    changed = True
+                    logger.info("Auto-fix: removed invalid node field '%s' from '%s'", field, node_name)
+
+        if changed:
+            out = StringIO()
+            yaml.dump(data, out)
+            return out.getvalue()
+    except Exception as e:
+        logger.warning("Failed to fix node definitions: %s", e)
     return yaml_text
 
 
