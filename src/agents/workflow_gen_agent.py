@@ -202,9 +202,31 @@ class WorkflowGenAgent:
 
         # XML samples
         xml_samples = wf_hints.get("xml_samples") or raw_artifacts.get("xml_samples", "")
+        xml_templates = requirements.get("xml_templates", {})
         xml_samples_text = ""
         if xml_samples:
-            xml_samples_text = f"\n=== SAMPLE XML FILES ===\n{xml_samples[:5000]}\n"
+            xml_samples_text = (
+                "\n=== SAMPLE XML FILES (use as templates for XML generation steps) ===\n"
+                f"{xml_samples[:5000]}\n\n"
+                "CRITICAL XML GENERATION RULES:\n"
+                "- Use the EXACT SPML format from the samples above — do NOT invent dummy XML\n"
+                "- Replace hardcoded values with CIQ variable references: ${configData.COLUMN_NAME}\n"
+                "- The IMSI must come from CIQ: ${configData.Test IMSI} or ${currentItem.Test IMSI}\n"
+                "- Each CIQ column that maps to an XML attribute MUST use ${configData.COLUMN_NAME}\n"
+                "- Generate separate XML for each modification type (IFC, VNI, PDN, etc.)\n"
+                "- When using echo/cat to create XML in 'send', use proper SPML namespaces\n"
+                "- NEVER leave XML tags blank or with placeholder text like 'NEW_VALUE'\n\n"
+            )
+        if xml_templates:
+            ciq_xml_map = xml_templates.get("ciq_to_xml_mapping", [])
+            if ciq_xml_map:
+                xml_samples_text += "=== CIQ COLUMN → XML TAG MAPPING ===\n"
+                for m in ciq_xml_map:
+                    xml_samples_text += (
+                        f"  CIQ '{m.get('ciq_column')}' → XML <{m.get('xml_tag')}> "
+                        f"(in {m.get('xml_sample_file', 'sample')})\n"
+                    )
+                xml_samples_text += "\n"
 
         # CIQ data — columns and sample rows
         ciq_data = input_data.get("ciq_data", {})
