@@ -347,6 +347,7 @@ class WorkflowGenAgent:
             "          - regex: '(?<applyResult>SUCCESS|FAILED)'\n"
             "        validation:\n"
             "          enabled: true\n"
+            "          description: 'Apply result should be SUCCESS'\n"
             "          success:\n"
             "            criteria:\n"
             "              expr: '${applyResult == \"SUCCESS\"}'\n"
@@ -415,13 +416,13 @@ class WorkflowGenAgent:
             "      - regex: '(?<hostName>\\S+)'\n"
             "    validation:\n"
             "      enabled: true\n"
-            "      description: Verify connectivity\n"
+            "      description: 'Hostname should be returned — confirms SSH connection is working'\n"
             "      success:\n"
             "        criteria:\n"
             "          expr: '${hostName != \"\"}'\n"
-            "        message: Connected successfully\n"
+            "        message: Connected to ${hostName}\n"
             "      failure:\n"
-            "        message: Failed to connect\n\n"
+            "        message: Failed to connect — no hostname returned\n\n"
 
             "REGISTER: must be a LIST of items with regex or name/value:\n"
             "  register:\n"
@@ -439,15 +440,40 @@ class WorkflowGenAgent:
             "        send: 'process ${currentItem}'\n"
             "WRONG loop format: '- loop: { id: ..., items: ... }' — 'loop' is NOT a valid step field\n\n"
 
-            "VALIDATION: must be a single OBJECT (not a list):\n"
+            "VALIDATION: must be a single OBJECT (not a list).\n"
+            "CRITICAL — every validation block MUST have a 'description' field.\n"
+            "The description is a SHORT PLAIN-TEXT sentence explaining what we check\n"
+            "to determine success or failure. It appears in the MOP report and execution report.\n\n"
+            "CORRECT validation format:\n"
             "  validation:\n"
             "    enabled: true\n"
+            "    description: '%idle should be greater than 90%% in at least 8 samples'\n"
             "    success:\n"
             "      criteria:\n"
-            "        expr: '${VAR != \"\"}'\n"
-            "      message: OK\n"
+            "        expr: '${idlePercent != \"\"}'\n"
+            "      message: CPU idle is ${idlePercent}%% (healthy)\n"
             "    failure:\n"
-            "      message: Failed\n"
+            "      message: CPU idle check failed\n\n"
+            "VALIDATION DESCRIPTION EXAMPLES (plain text, human-readable):\n"
+            "  - 'CPU idle should be above 90%% for healthy node'\n"
+            "  - 'All REMOTE NODE STATUS entries should show Link UP'\n"
+            "  - 'Updates Rejected and Queries Rejected should both be 0'\n"
+            "  - 'LDAP search should return exactly 1 subscriber entry'\n"
+            "  - 'IFC trigger should be found in hssGlobalFilterCriteria'\n"
+            "  - 'XML file should be generated successfully'\n"
+            "  - 'Response file should contain result=success'\n"
+            "  - 'Apache and instance status should be running'\n\n"
+            "RULES FOR description field:\n"
+            "  - ALWAYS include it — never omit\n"
+            "  - Write in plain English — what does success look like?\n"
+            "  - Reference specific values/patterns being checked\n"
+            "  - Keep it one sentence, max two\n\n"
+            "RULES FOR criteria.expr:\n"
+            "  - Use ONLY simple string comparisons: ==, !=, &&, ||\n"
+            "  - CORRECT: '${varName != \"\"}', '${status == \"success\"}'\n"
+            "  - WRONG: Double.parseDouble(), Integer.parseInt(), .contains(), .matches()\n"
+            "  - If you need to check a value exists, just use: '${varName != \"\"}'\n"
+            "  - Do NOT use 'true' as expr — always check an actual registered variable\n\n"
             "WRONG validation formats: validation: [list], success_expr, success_regex\n\n"
 
             "FORBIDDEN step fields: id, step_id, step_name, loop — use command_description instead of id, use for_each instead of loop\n"
@@ -1086,7 +1112,7 @@ def _strip_invalid_register_fields(yaml_text: str) -> str:
     return yaml_text
 
 
-_VALID_VALIDATION_FIELDS = {"enabled", "success", "failure", "warning"}
+_VALID_VALIDATION_FIELDS = {"enabled", "description", "success", "failure", "warning"}
 _VALID_VALIDATION_BRANCH_FIELDS = {"criteria", "message"}
 
 
@@ -1127,6 +1153,17 @@ def _strip_invalid_validation_fields(yaml_text: str) -> str:
                         changed = True
                         logger.info("Stripped invalid validation field: %s", k)
 
+                    # Ensure description exists — derive from success.message or command_description
+                    if "description" not in val or not val.get("description"):
+                        desc = ""
+                        succ = val.get("success", {})
+                        if isinstance(succ, dict) and succ.get("message"):
+                            desc = str(succ["message"])
+                        if not desc:
+                            desc = step.get("command_description", "Validation check")
+                        val["description"] = desc
+                        changed = True
+
                     for branch_key in ("success", "failure", "warning"):
                         branch = val.get(branch_key)
                         if isinstance(branch, dict):
@@ -1140,15 +1177,29 @@ def _strip_invalid_validation_fields(yaml_text: str) -> str:
                             # Fix criteria: string → {expr: '...'}
                             crit = branch.get("criteria")
                             if isinstance(crit, str):
-                                # Multi-line JS code → flatten to single expression
                                 crit = crit.strip()
                                 if "\n" in crit:
-                                    # Complex multi-line → simplify to 'true' (can't parse JS)
                                     crit = "true"
                                     logger.info("Simplified multi-line validation criteria to 'true'")
                                 branch["criteria"] = {"expr": crit}
                                 changed = True
-                                logger.info("Fixed validation criteria: string → {expr: ...}")
+                            elif isinstance(crit, dict):
+                                # Fix invalid expr values
+                                expr_val = str(crit.get("expr", "")).strip()
+                                # Remove unsupported Java functions
+                                for bad_fn in ("Double.parseDouble(", "Integer.parseInt(",
+                                               ".contains(", ".matches(", ".indexOf("):
+                                    if bad_fn in expr_val:
+                                        # Simplify to variable-exists check
+                                        import re as _re
+                                        var_match = _re.search(r'\$\{(\w+)', expr_val)
+                                        if var_match:
+                                            expr_val = '${' + var_match.group(1) + ' != ""}'
+                                        else:
+                                            expr_val = "true"
+                                        crit["expr"] = expr_val
+                                        changed = True
+                                        logger.info("Fixed unsupported function in criteria expr")
                 elif isinstance(val, list):
                     # validation as list → invalid, convert first item or remove
                     step["validation"] = val[0] if val and isinstance(val[0], dict) else {"enabled": True}
