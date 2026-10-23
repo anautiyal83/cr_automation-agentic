@@ -119,13 +119,92 @@ class WorkflowGenAgent:
         node_type = parts[0] if len(parts) == 2 else uc_name
         activity = parts[1] if len(parts) == 2 else ""
 
-        # MOP data
-        mop_data = input_data.get("mop_data", {})
-        mop_summary = json.dumps(mop_data, indent=2, default=str)[:6000] if mop_data else "No MOP data available"
+        # ── Requirements from RequirementsGatherer (authoritative) ──
+        requirements = input_data.get("requirements", {})
+        gen_hints = input_data.get("generation_hints", {})
+        wf_hints = gen_hints.get("workflow_yaml", {}) if isinstance(gen_hints.get("workflow_yaml"), dict) else {}
+        raw_artifacts = input_data.get("raw_artifacts", {})
+        dev_answers = input_data.get("developer_answers", {})
 
-        # Command outputs
+        # Determine which phases to generate (from requirements, not hardcoded)
+        orch = requirements.get("category_3_orchestration", {})
+        req_phases = orch.get("phases", ["preNodeHealthCheck", "activity", "postNodeHealthCheck"])
+        phase_overrides = wf_hints.get("phase_overrides", [])
+
+        # Build requirements context for the prompt
+        req_context_parts = []
+        if requirements:
+            # Node configs from requirements
+            node_info = requirements.get("category_1_node_activity", {})
+            if node_info.get("nodes"):
+                req_context_parts.append("=== NODE CONFIGURATION (from requirements) ===")
+                for n in node_info["nodes"]:
+                    req_context_parts.append(
+                        f"  Node: {n.get('name')} ({n.get('role')})\n"
+                        f"    SSH user: {n.get('ssh', {}).get('user', 'unknown')}\n"
+                        f"    Prompt regex: {n.get('prompt_regex', 'unknown')}\n"
+                        f"    Escalation: {n.get('escalation', {}).get('method', 'none')}\n"
+                        f"    Escalation prompt: {n.get('escalation', {}).get('prompt_regex', 'none')}"
+                    )
+
+            # Commands from requirements
+            cmd_info = requirements.get("category_2_commands", {})
+            if cmd_info.get("commands"):
+                req_context_parts.append("\n=== COMMANDS (from requirements) ===")
+                for c in cmd_info["commands"]:
+                    req_context_parts.append(
+                        f"  {c.get('cmd')} → node: {c.get('node')}, purpose: {c.get('purpose')}"
+                    )
+
+            # Phase instructions
+            req_context_parts.append(f"\n=== REQUIRED PHASES ===\n  {req_phases}")
+            if phase_overrides:
+                req_context_parts.append("=== PHASE CONSTRAINTS (MUST OBEY) ===")
+                for po in phase_overrides:
+                    req_context_parts.append(f"  *** {po} ***")
+
+            # Conditional logic hints
+            cond_logic = wf_hints.get("conditional_logic", [])
+            if cond_logic:
+                req_context_parts.append("\n=== CONDITIONAL LOGIC INSTRUCTIONS ===")
+                for cl in cond_logic:
+                    req_context_parts.append(f"  {cl}")
+
+        requirements_text = "\n".join(req_context_parts) if req_context_parts else ""
+
+        # Developer answers — direct quotes for context
+        dev_answers_text = ""
+        if dev_answers:
+            relevant = {k: v for k, v in dev_answers.items()
+                        if any(kw in k.lower() for kw in ("backup", "rollback", "phase", "prompt",
+                               "login", "ssh", "escalat", "command", "xml", "sftp"))}
+            if relevant:
+                dev_answers_text = (
+                    "\n=== DEVELOPER ANSWERS (AUTHORITATIVE — follow these exactly) ===\n"
+                    + json.dumps(relevant, indent=2, default=str)[:3000]
+                )
+
+        # MOP data — prefer raw MOP text over parsed templates
+        raw_mop = wf_hints.get("raw_mop_text") or raw_artifacts.get("mop_text", "")
+        mop_data = input_data.get("mop_data", {})
+        if raw_mop:
+            mop_summary = f"=== RAW MOP DOCUMENT ===\n{raw_mop[:10000]}"
+        else:
+            mop_summary = json.dumps(mop_data, indent=2, default=str)[:6000] if mop_data else "No MOP data available"
+
+        # Command outputs — prefer raw SSH logs over parsed pairs
+        raw_ssh = raw_artifacts.get("ssh_logs", "")
         cmd_outputs = input_data.get("command_outputs", {})
-        cmd_summary = json.dumps(cmd_outputs, indent=2, default=str)[:4000] if cmd_outputs else "No command outputs available"
+        if raw_ssh:
+            cmd_summary = f"=== RAW SSH SESSION LOGS ===\n{raw_ssh[:15000]}"
+        else:
+            cmd_summary = json.dumps(cmd_outputs, indent=2, default=str)[:4000] if cmd_outputs else "No command outputs available"
+
+        # XML samples
+        xml_samples = wf_hints.get("xml_samples") or raw_artifacts.get("xml_samples", "")
+        xml_samples_text = ""
+        if xml_samples:
+            xml_samples_text = f"\n=== SAMPLE XML FILES ===\n{xml_samples[:5000]}\n"
 
         # CIQ data — columns and sample rows
         ciq_data = input_data.get("ciq_data", {})
@@ -180,6 +259,10 @@ class WorkflowGenAgent:
             f"Generate a COMPLETE cli-automation workflow YAML for UC: {uc_name}\n"
             f"Node Type: {node_type}, Activity: {activity}\n\n"
 
+            f"{requirements_text}\n\n"
+
+            f"{dev_answers_text}\n\n"
+
             f"=== CIQ DATA (node connection info) ===\n{ciq_summary}\n\n"
             f"{conn_desc}\n\n"
 
@@ -189,6 +272,8 @@ class WorkflowGenAgent:
             f"=== MOP DATA (procedure steps to automate) ===\n{mop_summary}\n\n"
 
             f"=== COMMAND OUTPUT SAMPLES (expected CLI responses) ===\n{cmd_summary}\n\n"
+
+            f"{xml_samples_text}"
 
             f"{few_shot_text}{retry_info}{exec_feedback_text}\n\n"
 
@@ -271,38 +356,41 @@ class WorkflowGenAgent:
 
             "=== WORKFLOW GENERATION INSTRUCTIONS ===\n\n"
 
-            "Generate a PRODUCTION-READY workflow with these MANDATORY phases:\n\n"
+            f"Generate a PRODUCTION-READY workflow with EXACTLY these phases: {req_phases}\n"
+            "IMPORTANT: Only generate the phases listed above. Do NOT add extra phases.\n\n"
 
-            "1. PRE-NODE HEALTH CHECK phase:\n"
+            + (
+                "".join(f"*** CONSTRAINT: {po} ***\n" for po in phase_overrides) + "\n"
+                if phase_overrides else ""
+            ) +
+
+            "Phase descriptions (only generate phases that are in the list above):\n\n"
+
+            "- preNodeHealthCheck phase:\n"
             "   - Verify node connectivity (SSH login test)\n"
             "   - Check node health status (alarms, service state)\n"
-            "   - Identify IP version (IPv4/IPv6) if applicable\n"
-            "   - Verify prerequisites (required files, permissions, namespaces)\n"
             "   - Register discovered values for later use\n\n"
 
-            "2. BACKUP phase:\n"
+            "- backup phase (ONLY if listed in required phases above):\n"
             "   - Take configuration backup before changes\n"
             "   - Store backup on node and transfer to repository server\n"
-            "   - Verify backup integrity (checksum comparison)\n"
             "   - Register backup file paths for rollback\n\n"
 
-            "3. ACTIVITY CONFIGURATION phase (the main UC operation):\n"
+            "- activity phase (the main UC operation):\n"
             "   - Map EVERY MOP step to a workflow step\n"
             "   - Use for_each loops when operating on multiple items from configData\n"
             "   - Include validation after each significant command\n"
             "   - Register output values for post-check verification\n"
             "   - Handle errors with appropriate on_failure (stop/continue)\n\n"
 
-            "4. POST-NODE HEALTH CHECK phase:\n"
+            "- postNodeHealthCheck phase:\n"
             "   - Re-run the same health checks as pre-check\n"
             "   - Compare pre vs post values where applicable\n"
-            "   - Verify the activity changes were applied correctly\n"
-            "   - Verify node is still healthy after changes\n\n"
+            "   - Verify the activity changes were applied correctly\n\n"
 
-            "5. ROLLBACK CONFIGURATION phase:\n"
+            "- rollback phase (ONLY if listed in required phases above):\n"
             "   - Include when condition: '${ROLLBACK_REQUIRED == \"true\"}'\n"
-            "   - Reverse the activity changes using backup data\n"
-            "   - Verify rollback was successful\n\n"
+            "   - Reverse the activity changes using backup data\n\n"
 
             "=== NODE CONNECTION RULES ===\n\n"
 
@@ -314,7 +402,7 @@ class WorkflowGenAgent:
             "  node type: remote, plugin: ssh\n"
             "  ssh: { host: ${node_ip}, user: ${node_user}, auth: { password: ${SECRET.node_password} } }\n"
             "- If CIQ has only node names → assume NIAM proxy\n"
-            "- Always add a repo_server node for backup/file transfer operations\n\n"
+            "- Add a repo_server node ONLY if backup phase is required or file transfer is needed\n\n"
 
             "=== EXACT STEP STRUCTURE (Java model) ===\n\n"
 
@@ -398,8 +486,9 @@ class WorkflowGenAgent:
         system = (
             "You are a telecom network automation expert for the cr-automation CLI framework. "
             "You generate production-ready workflow YAML v1.2 files that execute MOP procedures "
-            "against network nodes via SSH. Your workflows are comprehensive with proper health checks, "
-            "backup, activity execution, post-checks, and rollback phases. "
+            "against network nodes via SSH. You ONLY generate the phases specified in the requirements — "
+            "do NOT add backup or rollback phases unless explicitly requested. "
+            "You follow developer answers and requirements exactly as given. "
             "You handle both NIAM proxy and direct SSH connections based on CIQ data."
         )
 
